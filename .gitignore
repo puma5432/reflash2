@@ -1,0 +1,4 @@
+# App
+FFDec.app
+.venv/
+build/swf_checkpoints/
