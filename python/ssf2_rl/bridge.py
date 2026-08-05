@@ -211,3 +211,10 @@ class SSF2Bridge:
 
     def request_state(self) -> None:
         self._send({"type": "state"})
+
+    def restart_match(self, config: dict | None = None) -> None:
+        """Tear down the current match and start a fresh one (for env.reset())."""
+        msg: dict = {"type": "restart_match"}
+        if config is not None:
+            msg["config"] = config
+        self._send(msg)

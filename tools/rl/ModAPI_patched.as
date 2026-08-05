@@ -795,6 +795,10 @@ package com.mcleodgaming.ssf2.modapi
                rlSend(rlBuildState());
             }
          }
+         else if(_loc3_ == "restart_match")
+         {
+            rlRestartMatch(_loc2_.config is Object ? _loc2_.config : null);
+         }
       }
 
       /**
@@ -1242,6 +1246,36 @@ package com.mcleodgaming.ssf2.modapi
          catch(e:Error)
          {
             trace("[ModAPI RL] startVSMatch failed: " + e.message);
+         }
+      }
+
+      /**
+       * Tear down the current match and start a fresh one with the given
+       * config (or the defaults). Used by the Gym env's reset().
+       *
+       * We must run the old StageData's endGame() so it removes its
+       * RENDER/ENTER_FRAME tick listeners; otherwise the disposed old match
+       * keeps ticking and throws null-reference errors.
+       */
+      public static function rlRestartMatch(param1:Object) : void
+      {
+         try
+         {
+            if(Boolean(GameController.stageData))
+            {
+               GameController.stageData.endGame(true);
+            }
+            else
+            {
+               GameController.endMatch();
+            }
+            GameController.destroyStageData();
+            GameController.isStarted = false;
+            rlStartVSMatch(param1);
+         }
+         catch(e:Error)
+         {
+            trace("[ModAPI RL] restartMatch failed: " + e.message);
          }
       }
    }
