@@ -6,8 +6,12 @@ package com.mcleodgaming.ssf2.modapi
    import com.mcleodgaming.ssf2.controllers.*;
    import com.mcleodgaming.ssf2.engine.AI;
    import com.mcleodgaming.ssf2.engine.Character;
+   import com.mcleodgaming.ssf2.engine.GameTimer;
+   import com.mcleodgaming.ssf2.engine.Projectile;
    import com.mcleodgaming.ssf2.engine.StageData;
    import com.mcleodgaming.ssf2.input.*;
+   import com.mcleodgaming.ssf2.items.Item;
+   import com.mcleodgaming.ssf2.platforms.Platform;
    import com.mcleodgaming.ssf2.util.*;
    import flash.display.*;
    import flash.events.Event;
@@ -789,51 +793,231 @@ package com.mcleodgaming.ssf2.modapi
 
       /**
        * Serialize the current match state to a plain object.
+       *
+       * Schema v2 additions over v1:
+       * - per-char: net velocity (speed+knockback), attack frame/exec/air/IASA/throw,
+       *   hitstun, invincibility/intangibility, held item name, control bits,
+       *   opponent-relative dx/dy/dist, team
+       * - stage: platforms/terrains (x,y,w,h,fallthrough,noDropThrough)
+       * - items: live items (x,y,xs,ys,name,ground)
+       * - projectiles: live projectiles (x,y,xs,ys,name,ownerId,team)
+       * - match: timer, schema version
        */
       private static function rlBuildState() : Object
       {
-         var _loc1_:Array = [];
-         var _loc2_:* = _api.Characters;
-         var _loc3_:int = 0;
-         while(_loc3_ < _loc2_.length)
+         var i:int = 0;
+         var j:int = 0;
+         var ch:Character = null;
+         var other:Character = null;
+         var obj:Object = null;
+         var dx:Number = 0;
+         var dy:Number = 0;
+         var d:Number = 0;
+         var chars:Array = [];
+         var charList:* = _api.Characters;
+
+         // ---- characters ----
+         i = 0;
+         while(i < charList.length)
          {
-            var _loc4_:Character = _loc2_[_loc3_];
-            if(_loc4_)
+            ch = charList[i];
+            if(ch)
             {
-               var _loc5_:Object = new Object();
-               _loc5_.id = _loc4_.ID;
-               _loc5_.uid = _loc4_.UID;
-               _loc5_.name = _loc4_.DisplayName;
-               _loc5_.x = _loc4_.X;
-               _loc5_.y = _loc4_.Y;
-               _loc5_.xs = _loc4_.XSpeed;
-               _loc5_.ys = _loc4_.YSpeed;
-               _loc5_.facing = _loc4_.FacingRight ? 1 : 0;
-               _loc5_.state = _loc4_.State;
-               _loc5_.damage = _loc4_.getDamage();
-               _loc5_.lives = _loc4_.getLives();
-               _loc5_.ground = Boolean(_loc4_.CollisionObj) && Boolean(_loc4_.CollisionObj.ground) ? 1 : 0;
-               _loc5_.dead = _loc4_.Dead ? 1 : 0;
-               _loc5_.cpu = _loc4_.CpuAI ? 1 : 0;
-               _loc5_.jumpCount = _loc4_.JumpCount;
-               _loc5_.maxJump = _loc4_.MaxJump;
-               _loc5_.shieldPower = _loc4_.ShieldPower;
-               _loc5_.shielding = _loc4_.Shielding ? 1 : 0;
-               _loc5_.hanging = _loc4_.Hanging ? 1 : 0;
-               _loc5_.frameNum = _loc4_.CurrentFrameNum;
-               _loc5_.hitLag = _loc4_.HitLag;
-               _loc5_.stocks = Boolean(_loc4_.getMatchResults()) ? int(_loc4_.getMatchResults().StockRemaining) : int(_loc4_.getLives());
-               _loc1_.push(_loc5_);
+               obj = new Object();
+               obj.id = ch.ID;
+               obj.uid = ch.UID;
+               obj.name = ch.DisplayName;
+               obj.team = ch.Team;
+               obj.x = ch.X;
+               obj.y = ch.Y;
+               obj.xs = ch.XSpeed;
+               obj.ys = ch.YSpeed;
+               // Net velocity = movement speed + knockback (what actually moves the char)
+               obj.nxs = ch.netXSpeed();
+               obj.nys = ch.netYSpeed();
+               obj.facing = ch.FacingRight ? 1 : 0;
+               obj.state = ch.State;
+               obj.damage = ch.getDamage();
+               obj.lives = ch.getLives();
+               obj.ground = Boolean(ch.CollisionObj) && Boolean(ch.CollisionObj.ground) ? 1 : 0;
+               obj.dead = ch.Dead ? 1 : 0;
+               obj.cpu = ch.CpuAI ? 1 : 0;
+               obj.jumpCount = ch.JumpCount;
+               obj.maxJump = ch.MaxJump;
+               obj.shieldPower = ch.ShieldPower;
+               obj.shielding = ch.Shielding ? 1 : 0;
+               obj.hanging = ch.Hanging ? 1 : 0;
+               obj.frameNum = ch.CurrentFrameNum;
+               obj.hitLag = ch.HitLag;
+               obj.stocks = Boolean(ch.getMatchResults()) ? int(ch.getMatchResults().StockRemaining) : int(ch.getLives());
+               // --- attack state (only meaningful while actually attacking) ---
+               var atkFrame:String = ch.getCurrentAttackFrame();
+               obj.atkFrame = atkFrame;
+               if(atkFrame != null)
+               {
+                  obj.atkExec = ch.getExecTime();
+                  obj.atkAir = Boolean(ch.AttackStateData) && ch.AttackStateData.IsAirAttack ? 1 : 0;
+                  obj.atkIASA = Boolean(ch.AttackStateData) && ch.AttackStateData.IASA ? 1 : 0;
+                  obj.atkThrow = Boolean(ch.AttackStateData) && ch.AttackStateData.IsThrow ? 1 : 0;
+               }
+               else
+               {
+                  obj.atkExec = 0;
+                  obj.atkAir = 0;
+                  obj.atkIASA = 0;
+                  obj.atkThrow = 0;
+               }
+               // --- status flags ---
+               obj.hitstun = ch.isHitStunOrParalysis() ? 1 : 0;
+               obj.invincible = ch.isInvincible() ? 1 : 0;
+               obj.intangible = ch.isIntangible() ? 1 : 0;
+               obj.controls = ch.getControlBitsAPI(false);
+               // --- held item ---
+               obj.item = ch.HoldingItem && Boolean(ch.ItemObj) ? ch.ItemObj.LinkageID : null;
+               // --- opponent-relative features (nearest living opponent) ---
+               obj.oppDx = 0;
+               obj.oppDy = 0;
+               obj.oppDist = -1;
+               obj.oppId = -1;
+               obj.oppDamage = 0;
+               obj.oppState = 0;
+               j = 0;
+               while(j < charList.length)
+               {
+                  other = charList[j];
+                  if(Boolean(other) && other !== ch && !other.Dead && !(other.Team == ch.Team && ch.Team > 0))
+                  {
+                     dx = other.X - ch.X;
+                     dy = other.Y - ch.Y;
+                     d = Math.sqrt(dx * dx + dy * dy);
+                     if(obj.oppDist < 0 || d < obj.oppDist)
+                     {
+                        obj.oppDist = d;
+                        obj.oppDx = dx;
+                        obj.oppDy = dy;
+                        obj.oppId = other.ID;
+                        obj.oppDamage = other.getDamage();
+                        obj.oppState = other.State;
+                     }
+                  }
+                  j++;
+               }
+               chars.push(obj);
             }
-            _loc3_++;
+            i++;
          }
-         var _loc6_:Object = new Object();
-         _loc6_.type = "state";
-         _loc6_.frame = _api.ElapsedFrames;
-         _loc6_.paused = _api.Paused ? 1 : 0;
-         _loc6_.ended = _api.GameEnded ? 1 : 0;
-         _loc6_.chars = _loc1_;
-         return _loc6_;
+
+         // ---- stage geometry ----
+         var platforms:Array = [];
+         var platList:* = _api.Platforms;
+         i = 0;
+         while(i < platList.length)
+         {
+            var p:Platform = platList[i];
+            if(p)
+            {
+               platforms.push({
+                  "x":p.X,
+                  "y":p.Y,
+                  "w":p.Width,
+                  "h":p.Height,
+                  "fall":p.fallthrough ? 1 : 0,
+                  "nodrop":p.noDropThrough ? 1 : 0
+               });
+            }
+            i++;
+         }
+         var terrains:Array = [];
+         var terrList:* = _api.Terrains;
+         i = 0;
+         while(i < terrList.length)
+         {
+            var t:Platform = terrList[i];
+            if(t)
+            {
+               terrains.push({
+                  "x":t.X,
+                  "y":t.Y,
+                  "w":t.Width,
+                  "h":t.Height,
+                  "fall":t.fallthrough ? 1 : 0
+               });
+            }
+            i++;
+         }
+
+         // ---- items ----
+         var items:Array = [];
+         if(Boolean(_api.ItemsRef))
+         {
+            var itemList:* = _api.ItemsRef.ItemsInUse;
+            i = 0;
+            while(i < itemList.length)
+            {
+               var it:Item = itemList[i];
+               if(Boolean(it) && !it.Dead && !it.PickedUp)
+               {
+                  items.push({
+                     "name":it.LinkageID,
+                     "x":it.X,
+                     "y":it.Y,
+                     "xs":it.XSpeed,
+                     "ys":it.YSpeed,
+                     "ground":it.Ground ? 1 : 0
+                  });
+               }
+               i++;
+            }
+         }
+
+         // ---- projectiles ----
+         var projs:Array = [];
+         var projList:* = _api.Projectiles;
+         i = 0;
+         while(i < projList.length)
+         {
+            var pr:Projectile = projList[i];
+            if(Boolean(pr) && !pr.Dead && pr.Visible)
+            {
+               var ownerId:int = -1;
+               if(Boolean(pr.getOwner()) && pr.getOwner() is Character)
+               {
+                  ownerId = Character(pr.getOwner()).ID;
+               }
+               projs.push({
+                  "name":pr.LinkageID,
+                  "x":pr.X,
+                  "y":pr.Y,
+                  "xs":pr.XSpeed,
+                  "ys":pr.YSpeed,
+                  "owner":ownerId,
+                  "team":pr.TeamID
+               });
+            }
+            i++;
+         }
+
+         // ---- match-level ----
+         var timerVal:int = -1;
+         var timer:GameTimer = _api.TimerRef;
+         if(Boolean(timer))
+         {
+            timerVal = timer.CurrentTime;
+         }
+
+         var state:Object = new Object();
+         state.type = "state";
+         state.schema = 2;
+         state.frame = _api.ElapsedFrames;
+         state.paused = _api.Paused ? 1 : 0;
+         state.ended = _api.GameEnded ? 1 : 0;
+         state.timer = timerVal;
+         state.chars = chars;
+         state.platforms = platforms;
+         state.terrains = terrains;
+         state.items = items;
+         state.projs = projs;
+         return state;
       }
 
       /**
