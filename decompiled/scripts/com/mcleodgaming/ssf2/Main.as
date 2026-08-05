@@ -25,60 +25,60 @@ package com.mcleodgaming.ssf2
    import flash.ui.*;
    import flash.utils.*;
    import mx.utils.*;
-   
+
    public dynamic class Main extends MovieClip
    {
-      
+
       private static var ROOT:Main;
-      
+
       private static var m_randCharList:Vector.<CharacterData>;
-      
+
       private static var m_randMusicIndex:int;
-      
+
       public static var m_debugField:TextField;
-      
+
       public static var preloader:MovieClip;
-      
+
       public static var m_sdk:DiscordGameSDK;
-      
+
       public static var m_sdkTimer:Timer;
-      
+
       public static var m_onlineChar:String;
-      
+
       public static var m_onlineName:String;
-      
+
       private static var m_classRefs:Array = new Array(menu_preloader);
-      
+
       private static var m_guidID:Number = 0;
-      
+
       private static var m_width:Number = 640;
-      
+
       private static var m_height:Number = 360;
-      
+
       public static const MAXPLAYERS:int = 4;
-      
+
       public static const SHOWMASK:Boolean = true;
-      
+
       public static const ENCRYPTED:Boolean = Config.encrypt_files;
-      
+
       private static const DEBUGCONST:Boolean = true;
-      
+
       private static var m_lazyDebug:Boolean = true;
-      
+
       public static var FORCEDEBUGOFF:Boolean = false;
-      
+
       public static var DEBUGAUTHED:Boolean = true;
-      
+
       public static var LOCALHOST:Boolean = true;
-      
+
       public static var DOMAIN:String = "localhost";
-      
+
       public static var AUTHORIZED:Boolean = false;
-      
+
       public static const FRAMERATE:int = 30;
-      
+
       private static var m_pendingDiscordJoin:Object = null;
-      
+
       public function Main()
       {
          var myMenu:ContextMenu;
@@ -149,12 +149,12 @@ package com.mcleodgaming.ssf2
             }
          },1000);
       }
-      
+
       public static function get isFullscreen() : Boolean
       {
          return ROOT.stage.displayState === StageDisplayState.FULL_SCREEN_INTERACTIVE;
       }
-      
+
       public static function windowStateChanged(param1:NativeWindowDisplayStateEvent) : void
       {
          var e:NativeWindowDisplayStateEvent = param1;
@@ -167,7 +167,7 @@ package com.mcleodgaming.ssf2
             },1);
          }
       }
-      
+
       private static function handleGlobalKeypress(param1:KeyboardEvent) : void
       {
          if(param1.ctrlKey && param1.keyCode === 70)
@@ -206,7 +206,7 @@ package com.mcleodgaming.ssf2
             }
          }
       }
-      
+
       public static function toggleFullScreen(param1:Boolean) : void
       {
          if(!Main.isFullscreen)
@@ -218,7 +218,7 @@ package com.mcleodgaming.ssf2
             Main.Root.stage.displayState = StageDisplayState.NORMAL;
          }
       }
-      
+
       public static function setFullScreenMode(param1:int) : void
       {
          if(param1 == 0)
@@ -230,31 +230,31 @@ package com.mcleodgaming.ssf2
             Main.Root.stage.fullScreenSourceRect = null;
          }
       }
-      
+
       public static function setFocus(param1:InteractiveObject) : void
       {
          Main.Root.stage.focus = param1;
       }
-      
+
       public static function fixFocus() : void
       {
          Main.Root.stage.focus = Main.Root.stage;
       }
-      
+
       public static function fixMenu(param1:Event) : void
       {
          ROOT.stage.showDefaultContextMenu = false;
       }
-      
+
       public static function resetScrollRect() : void
       {
          Main.Root.scrollRect = null;
       }
-      
+
       public static function wideScreenScrollRect() : void
       {
       }
-      
+
       private static function makeClassStringArr() : void
       {
          var _loc1_:String = null;
@@ -268,7 +268,7 @@ package com.mcleodgaming.ssf2
             _loc3_++;
          }
       }
-      
+
       private static function randomTest() : void
       {
          var _loc2_:int = 0;
@@ -280,7 +280,7 @@ package com.mcleodgaming.ssf2
          }
          trace("[Random test complete: Average rand value is " + _loc1_ / 1000000 + "]");
       }
-      
+
       private static function initResources() : void
       {
          var _loc1_:LocalConnection = new LocalConnection();
@@ -296,7 +296,7 @@ package com.mcleodgaming.ssf2
             Main.AUTHORIZED = true;
          }
       }
-      
+
       public static function prepRandomCharacters(param1:Number) : void
       {
          m_randCharList = new Vector.<CharacterData>();
@@ -305,12 +305,12 @@ package com.mcleodgaming.ssf2
             m_randCharList.push(Stats.getRandomCharacter());
          }
       }
-      
+
       public static function clearRandomCharacterPrep() : void
       {
          m_randCharList.splice(0,m_randCharList.length);
       }
-      
+
       public static function prepRandomMusic(param1:Number) : void
       {
          if(Boolean(Main.DEBUG) || Boolean(SaveData.Unlocks.alternate_tracks) || Boolean(ResourceManager.FORCE_ENABLE_ALT_TRACKS))
@@ -323,7 +323,7 @@ package com.mcleodgaming.ssf2
             m_randMusicIndex = 0;
          }
       }
-      
+
       public static function getURL(param1:*, param2:String = "_self") : void
       {
          var _loc3_:String = null;
@@ -345,13 +345,13 @@ package com.mcleodgaming.ssf2
             }
          }
       }
-      
+
       private static function resourceLoadProgress(param1:Number) : void
       {
          Main.preloader.pCent.text = "" + Math.floor(100 * (1 / 20) + 19 / 20 * param1);
          Main.preloader.progressBar.scaleX = Math.floor(100 * (1 / 20) + 19 / 20 * param1);
       }
-      
+
       private static function initGame() : void
       {
          var _local_2:* = undefined;
@@ -462,12 +462,12 @@ package com.mcleodgaming.ssf2
             trace("[Main] Stack trace: " + e.getStackTrace());
          }
       }
-      
+
       public static function get Root() : Main
       {
          return ROOT;
       }
-      
+
       public static function getClassByName(param1:String) : Class
       {
          var _loc2_:Class = null;
@@ -480,52 +480,52 @@ package com.mcleodgaming.ssf2
          }
          return _loc2_;
       }
-      
+
       public static function getClassName(param1:*) : String
       {
          return getQualifiedClassName(param1);
       }
-      
+
       public static function get DebugField() : TextField
       {
          return m_debugField;
       }
-      
+
       public static function get Width() : Number
       {
          return m_width;
       }
-      
+
       public static function get Height() : Number
       {
          return m_height;
       }
-      
+
       public static function get DEBUG() : Boolean
       {
          return (Boolean(DEBUGCONST) || Boolean(m_lazyDebug)) && !FORCEDEBUGOFF;
       }
-      
+
       public static function get LAZYDEBUG() : Boolean
       {
          return m_lazyDebug;
       }
-      
+
       public static function get RandCharList() : Vector.<CharacterData>
       {
          return m_randCharList;
       }
-      
+
       public static function get RandMusicIndex() : int
       {
          return m_randMusicIndex;
       }
-      
+
       public static function turnOffDebug() : void
       {
          FORCEDEBUGOFF = true;
       }
-      
+
       private static function updateDiscordSDK(param1:TimerEvent) : void
       {
          if(m_sdk)
@@ -533,7 +533,7 @@ package com.mcleodgaming.ssf2
             m_sdk.runCallbacks();
          }
       }
-      
+
       public static function handleDiscordJoin(param1:DiscordEvent) : void
       {
          var joinSecret:String;
@@ -576,7 +576,7 @@ package com.mcleodgaming.ssf2
             trace("[Main] Error parsing Discord join secret: " + error.message);
          }
       }
-      
+
       public static function handleDiscordJoinRequest(param1:DiscordEvent) : void
       {
          var data:Object = null;
@@ -601,13 +601,13 @@ package com.mcleodgaming.ssf2
             trace("[Main] Error handling Discord join request: " + error.message);
          }
       }
-      
+
       public static function handleDiscordInvite(param1:DiscordEvent) : void
       {
          trace("[Main] handleDiscordInvite called");
          MultiplayerManager.notify("Discord invite sent!");
       }
-      
+
       private static function acceptDiscordJoinRequest() : void
       {
          trace("[Main] acceptDiscordJoinRequest called");
@@ -618,7 +618,7 @@ package com.mcleodgaming.ssf2
          }
          _loc1_.removeSelf();
       }
-      
+
       private static function rejectDiscordJoinRequest() : void
       {
          trace("[Main] rejectDiscordJoinRequest called");
@@ -629,7 +629,7 @@ package com.mcleodgaming.ssf2
          }
          _loc1_.removeSelf();
       }
-      
+
       public static function processDiscordJoin() : void
       {
          var _loc1_:String = null;
@@ -654,17 +654,17 @@ package com.mcleodgaming.ssf2
             trace("[Main] No pending Discord join or not connected");
          }
       }
-      
+
       public static function get hasPendingDiscordJoin() : Boolean
       {
          return m_pendingDiscordJoin != null;
       }
-      
+
       public static function clearPendingDiscordJoin() : void
       {
          m_pendingDiscordJoin = null;
       }
-      
+
       private function onRootLoadProgress(param1:ProgressEvent) : void
       {
          var _loc2_:int = param1.bytesTotal == 0 ? 706780 : int(param1.bytesTotal);
@@ -677,7 +677,7 @@ package com.mcleodgaming.ssf2
          Main.preloader.pCent.text = Math.floor(_loc3_ * (1 / 20));
          Main.preloader.progressBar.scaleX = _loc3_ / 100 * (1 / 20);
       }
-      
+
       protected function onRootLoadComplete(param1:Event) : void
       {
          ROOT.loaderInfo.removeEventListener(ProgressEvent.PROGRESS,ROOT.onRootLoadProgress);
@@ -688,7 +688,7 @@ package com.mcleodgaming.ssf2
             "oncomplete":initGame
          });
       }
-      
+
       private function resizeListener(param1:Event) : void
       {
          trace("resized");

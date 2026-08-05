@@ -2,3 +2,8 @@
 FFDec.app
 .venv/
 build/swf_checkpoints/
+python/ssf2_rl/__pycache__/*
+
+*.pyc
+*.DS_Store
+.macos/
