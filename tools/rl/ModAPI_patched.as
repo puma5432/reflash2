@@ -9,6 +9,7 @@ package com.mcleodgaming.ssf2.modapi
    import com.mcleodgaming.ssf2.engine.GameTimer;
    import com.mcleodgaming.ssf2.engine.Projectile;
    import com.mcleodgaming.ssf2.engine.StageData;
+   import com.mcleodgaming.ssf2.enums.Mode;
    import com.mcleodgaming.ssf2.input.*;
    import com.mcleodgaming.ssf2.items.Item;
    import com.mcleodgaming.ssf2.platforms.Platform;
@@ -19,6 +20,9 @@ package com.mcleodgaming.ssf2.modapi
    import flash.events.ProgressEvent;
    import flash.events.SecurityErrorEvent;
    import flash.events.ServerSocketConnectEvent;
+   import flash.filesystem.File;
+   import flash.filesystem.FileMode;
+   import flash.filesystem.FileStream;
    import flash.net.ServerSocket;
    import flash.net.Socket;
 
@@ -610,6 +614,16 @@ package com.mcleodgaming.ssf2.modapi
          {
             return;
          }
+         // Retry the server bind until it succeeds (it can fail transiently at
+         // startup). Only stop listening once the server is actually up.
+         if(_rlServer == null)
+         {
+            rlStartServer();
+            if(_rlServer == null)
+            {
+               return;
+            }
+         }
          if(Boolean(Main.Root) && Boolean(Main.Root.stage))
          {
             Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlEnsureAttached);
@@ -643,13 +657,23 @@ package com.mcleodgaming.ssf2.modapi
 
       private static function rlStartServer() : void
       {
-         _rlServer = new ServerSocket();
-         _rlServer.addEventListener(ServerSocketConnectEvent.CONNECT,rlOnConnect);
-         _rlServer.addEventListener(IOErrorEvent.IO_ERROR,rlOnServerError);
-         _rlServer.addEventListener(SecurityErrorEvent.SECURITY_ERROR,rlOnServerError);
-         _rlServer.bind(_rlPort,"127.0.0.1");
-         _rlServer.listen();
-         trace("[ModAPI RL] RL bridge listening on 127.0.0.1:" + _rlPort);
+         try
+         {
+            _rlServer = new ServerSocket();
+            _rlServer.addEventListener(ServerSocketConnectEvent.CONNECT,rlOnConnect);
+            _rlServer.addEventListener(IOErrorEvent.IO_ERROR,rlOnServerError);
+            _rlServer.addEventListener(SecurityErrorEvent.SECURITY_ERROR,rlOnServerError);
+            _rlServer.bind(_rlPort,"127.0.0.1");
+            _rlServer.listen();
+            trace("[ModAPI RL] RL bridge listening on 127.0.0.1:" + _rlPort);
+         }
+         catch(e:Error)
+         {
+            // Transient bind failures (e.g. socket not ready yet at startup).
+            // Null it out so rlEnsureAttached() retries on a later frame.
+            trace("[ModAPI RL] Failed to start RL server: " + e.message + " - will retry.");
+            _rlServer = null;
+         }
       }
 
       private static function rlOnServerError(param1:Event) : void
@@ -1074,6 +1098,150 @@ package com.mcleodgaming.ssf2.modapi
                return;
             }
             _loc3_++;
+         }
+      }
+
+      // ========== AUTO-START (launch straight into a local VS match) ==========
+
+      private static var _rlAutoStartDone:Boolean = false;
+
+      /**
+       * Called once from Main after the initial menu is shown. If an
+       * autostart.json config is present in the application directory and
+       * enabled, immediately launch a local VS match with the configured
+       * stage/characters so the RL bridge comes online without manual menu
+       * navigation.
+       */
+      public static function rlAutoStartCheck() : void
+      {
+         if(_rlAutoStartDone)
+         {
+            return;
+         }
+         var cfg:Object = rlReadAutoStartConfig();
+         if(!cfg || cfg.enabled !== true)
+         {
+            return;
+         }
+         _rlAutoStartDone = true;
+         trace("[ModAPI RL] autostart.json found - launching VS match.");
+         rlStartVSMatch(cfg);
+      }
+
+      /**
+       * Read autostart.json from the application directory. Returns null if the
+       * file is missing or unparseable.
+       */
+      private static function rlReadAutoStartConfig() : Object
+      {
+         try
+         {
+            var f:File = File.applicationDirectory.resolvePath("autostart.json");
+            if(!f.exists)
+            {
+               return null;
+            }
+            var fs:FileStream = new FileStream();
+            fs.open(f,FileMode.READ);
+            var txt:String = fs.readUTFBytes(fs.bytesAvailable);
+            fs.close();
+            return JSON.parse(txt);
+         }
+         catch(e:Error)
+         {
+            trace("[ModAPI RL] Failed to read autostart.json: " + e.message);
+         }
+         return null;
+      }
+
+      /**
+       * Build a VS Game object and start the match, replicating the normal
+       * VSMenu -> StageSelect -> startMatch flow.
+       *
+       * cfg fields (all optional):
+       *   stage:      stage id (default "finaldestination")
+       *   characters: array of character ids per slot (default ["marth","sandbag"])
+       *   lives:      stock count (default 99)
+       *   cpuLevel:   CPU level for non-human slots (default 9)
+       *   usingTime:  enable match timer (default false)
+       *   time:       timer minutes when usingTime (default 99)
+       */
+      public static function rlStartVSMatch(cfg:Object) : void
+      {
+         if(!cfg)
+         {
+            cfg = {};
+         }
+         if(GameController.isStarted)
+         {
+            trace("[ModAPI RL] startVSMatch skipped - a match is already starting.");
+            return;
+         }
+         try
+         {
+            var stageID:String = cfg.stage || "finaldestination";
+            var chars:Array = cfg.characters is Array && cfg.characters.length >= 2 ? cfg.characters : ["marth","sandbag"];
+            var lives:int = cfg.lives is Number ? int(cfg.lives) : 99;
+            var cpuLevel:int = cfg.cpuLevel is Number ? int(cfg.cpuLevel) : 9;
+
+            var game:Game = new Game(chars.length,Mode.VS);
+            game.LevelData.stage = stageID;
+            game.UsingLives = true;
+            game.Lives = lives;
+            game.UsingTime = cfg.usingTime === true;
+            if(cfg.usingTime === true)
+            {
+               game.Time = cfg.time is Number ? int(cfg.time) : 99;
+            }
+            game.HudDisplay = true;
+            game.PauseEnabled = true;
+            game.ShowPlayerID = true;
+            // RL build: items off by default. The stock game's item timelines
+            // (e.g. exploding tag) throw Error #1010 when spawned, and items
+            // add nondeterminism that hurts RL reproducibility.
+            game.Items.setAllItemStatuses(false);
+            game.Items.frequency = 0;
+
+            var i:int = 0;
+            while(i < game.PlayerSettings.length)
+            {
+               var ps:PlayerSetting = game.PlayerSettings[i];
+               ps.exist = true;
+               ps.character = String(chars[i]);
+               ps.lives = lives;
+               if(i > 0)
+               {
+                  ps.human = false;
+                  ps.level = cpuLevel;
+               }
+               i++;
+            }
+
+            GameController.isStarted = true;
+            game.LevelData.randSeed = Utils.randomInteger(1,1000);
+            Utils.setRandSeed(game.LevelData.randSeed);
+            Utils.shuffleRandom();
+            Main.prepRandomCharacters(game.PlayerSettings.length);
+            ResourceManager.queueResources([game.LevelData.stage]);
+            i = 0;
+            while(i < game.PlayerSettings.length)
+            {
+               if(Boolean(game.PlayerSettings[i]) && Boolean(game.PlayerSettings[i].exist) && Boolean(game.PlayerSettings[i].character != null) && game.PlayerSettings[i].character != "xp")
+               {
+                  ResourceManager.queueResources([game.PlayerSettings[i].character == "random" ? Main.RandCharList[i].StatsName : game.PlayerSettings[i].character]);
+               }
+               i++;
+            }
+            ResourceManager.load({"oncomplete":function(...args):void
+            {
+               MenuController.disposeAllMenus();
+               GameController.startMatch(game);
+            }});
+            trace("[ModAPI RL] VS match start queued (stage=" + stageID + ", chars=" + chars.join(",") + ").");
+         }
+         catch(e:Error)
+         {
+            trace("[ModAPI RL] startVSMatch failed: " + e.message);
          }
       }
    }

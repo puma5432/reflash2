@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "stage": "finaldestination",
+  "characters": ["marth", "samus"],
+  "lives": 99,
+  "cpuLevel": 9,
+  "usingTime": false,
+  "time": 99
+}
