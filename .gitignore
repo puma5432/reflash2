@@ -1,9 +1,14 @@
 # App
 FFDec.app
-.venv/
-build/swf_checkpoints/
-python/ssf2_rl/__pycache__/*
 
-*.pyc
-*.DS_Store
+# Builds/data
+build/swf_checkpoints/
 .macos/
+notebooks/data/
+
+# Tools
+.venv/
+python/ssf2_rl/__pycache__/
+python/ssf2_rl.egg-info/
+*.DS_Store
+.vscode/

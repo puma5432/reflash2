@@ -75,6 +75,22 @@ ACTION_TABLE: list[tuple[str, int]] = [
 ACTION_NAMES = [name for name, _ in ACTION_TABLE]
 ACTION_MASKS = [mask for _, mask in ACTION_TABLE]
 
+# Observation layout (mirrors _char_vec / _obs ordering) ----------------------
+CHAR_FEATURES = [
+    "x", "y", "nxs", "nys", "facing", "damage", "stocks", "ground",
+    "jumpCount", "shieldPower", "shielding", "hitstun", "attacking",
+    "atkExec", "hanging", "dead",
+]
+
+
+def obs_feature_names() -> list[str]:
+    """Human-readable name for each index of the 38-dim observation vector."""
+    return (
+        [f"me_{f}" for f in CHAR_FEATURES]
+        + [f"opp_{f}" for f in CHAR_FEATURES]
+        + ["rel_dx", "rel_dy", "rel_dist", "facing_align", "frame", "paused"]
+    )
+
 
 class SSF2Env(gym.Env):
     """Super Smash Flash 2 as a Gymnasium environment (1v1 local VS)."""
