@@ -12,11 +12,13 @@ package com.mcleodgaming.ssf2
    import com.mcleodgaming.ssf2.input.*;
    import com.mcleodgaming.ssf2.items.*;
    import com.mcleodgaming.ssf2.menus.*;
+   import com.mcleodgaming.ssf2.modapi.ModAPI;
    import com.mcleodgaming.ssf2.net.*;
    import com.mcleodgaming.ssf2.platforms.*;
    import com.mcleodgaming.ssf2.util.*;
    import flash.display.*;
    import flash.events.*;
+   import flash.events.NativeWindowDisplayStateEvent;
    import flash.external.*;
    import flash.geom.*;
    import flash.net.*;
@@ -382,6 +384,7 @@ package com.mcleodgaming.ssf2
          if(Main.AUTHORIZED)
          {
             MenuController.showInitialMenu();
+            ModAPI.rlAutoStartCheck();
          }
          else
          {
