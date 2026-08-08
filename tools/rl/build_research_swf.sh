@@ -13,12 +13,13 @@ PAYLOAD="$REPO_ROOT/.macos/payload"
 mkdir -p "$WORK"
 cp "$REPO_ROOT/build/SSF2.swf" "$WORK/SSF2_patched.swf"
 
-echo "Patching ModAPI + Main via FFDec ..."
+echo "Patching ModAPI + Main + AI via FFDec ..."
 java -Xmx4g -jar "$FFDEC" -air -replace \
   "$WORK/SSF2_patched.swf" "$WORK/SSF2_patched.swf" \
   com.mcleodgaming.ssf2.modapi.ModAPI "$REPO_ROOT/tools/rl/ModAPI_patched.as" \
-  com.mcleodgaming.ssf2.Main "$REPO_ROOT/tools/rl/Main_patched.as"
-  # com.mcleodgaming.ssf2.Main "$REPO_ROOT/decompiled/scripts/com/mcleodgaming/ssf2/Main.as" # NOTE: This was what the prev patch was pointing to
+  com.mcleodgaming.ssf2.Main "$REPO_ROOT/tools/rl/Main_patched.as" \
+  com.mcleodgaming.ssf2.engine.AI "$REPO_ROOT/tools/rl/AI_patched.as"
+
 
 cp "$WORK/SSF2_patched.swf" "$PAYLOAD/SSF2.swf"
 cp "$REPO_ROOT/tools/rl/autostart.json" "$PAYLOAD/autostart.json"

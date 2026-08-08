@@ -1261,6 +1261,11 @@ package com.mcleodgaming.ssf2.modapi
       {
          try
          {
+            // If the client supplied no configuration, reuse autostart.json.
+            if(!param1)
+            {
+               param1 = rlReadAutoStartConfig();
+            }
             if(Boolean(GameController.stageData))
             {
                GameController.stageData.endGame(true);

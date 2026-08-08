@@ -123,8 +123,8 @@ class SSF2Env(gym.Env):
 
         # Observation: agent(16) + opponent(16) + relative(4) + match(2)
         n_obs = 16 + 16 + 4 + 2
-        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(n_obs,), dtype=np.float32)
-        self.action_space = spaces.Discrete(len(ACTION_TABLE))
+        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(n_obs,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
+        self.action_space = spaces.Discrete(len(ACTION_TABLE)) # TODO: should I use multibinary spaces, or do I need to use the bit mask?
 
     # -- lifecycle -----------------------------------------------------------
 
