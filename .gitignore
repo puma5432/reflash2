@@ -8,7 +8,7 @@ notebooks/data/
 
 # Tools
 .venv/
-python/ssf2_rl/__pycache__/
+*.pyc
 python/ssf2_rl.egg-info/
 *.DS_Store
 .vscode/

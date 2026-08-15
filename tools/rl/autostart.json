@@ -3,7 +3,7 @@
   "stage": "finaldestination",
   "characters": ["marth", "samus"],
   "lives": 99,
-  "cpuLevel": 9,
+  "cpuLevel": 0,
   "usingTime": false,
   "time": 99
 }

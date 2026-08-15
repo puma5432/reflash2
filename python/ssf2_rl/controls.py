@@ -13,8 +13,8 @@ SHIELD = 1 << 1
 TAUNT = 1 << 2
 START = 1 << 3
 GRAB = 1 << 4
-BUTTON2 = 1 << 5   # special
-BUTTON1 = 1 << 6   # attack
+SPECIAL = 1 << 5   # special
+ATTACK = 1 << 6   # attack
 JUMP = 1 << 7
 RIGHT = 1 << 8
 LEFT = 1 << 9
@@ -39,8 +39,8 @@ BITS = {
     "TAUNT": TAUNT,
     "START": START,
     "GRAB": GRAB,
-    "BUTTON2": BUTTON2,
-    "BUTTON1": BUTTON1,
+    "SPECIAL": SPECIAL,
+    "ATTACK": ATTACK,
     "JUMP": JUMP,
     "RIGHT": RIGHT,
     "LEFT": LEFT,

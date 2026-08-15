@@ -11,7 +11,6 @@ local VS match (auto-started by the instrumented build).
 
 from __future__ import annotations
 
-import math
 from typing import Any, Optional
 
 import numpy as np
@@ -22,74 +21,26 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("pip install 'ssf2-rl[rl]' (gymnasium) to use SSF2Env") from exc
 
+from .actions import ACTION_TABLE, ACTION_NAMES, ACTION_MASKS
 from .bridge import SSF2Bridge, BridgeError
-from .controls import Controls
+from .launcher import ensure_game_running
+from .obs import (
+    CHAR_FEATURES,
+    OBS_DIM,
+    build_obs,
+    obs_feature_names,
+    pick_chars,
+    reward_delta,
+)
 
 # Default bridge endpoint
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4567
 
-# Normalization constants (stage coords are roughly +/- 300 x, +/- 250 y;
-# speeds ~ +/- 20; damage 0-999; shield 0-100).
-_POS = 400.0
-_VEL = 25.0
-_DMG = 300.0
-
-
-def _norm(v: float, scale: float) -> float:
-    return max(-1.0, min(1.0, float(v) / scale))
-
-
-# ---- Action space: named control masks -------------------------------------
-def _mask(**kw: bool) -> int:
-    c = Controls()
-    for name, on in kw.items():
-        c.set(name, on)
-    return int(c)
-
-
-ACTION_TABLE: list[tuple[str, int]] = [
-    ("noop", 0),
-    ("left", _mask(LEFT=True)),
-    ("right", _mask(RIGHT=True)),
-    ("up", _mask(UP=True)),
-    ("down", _mask(DOWN=True)),
-    ("jump", _mask(JUMP=True)),
-    ("attack", _mask(BUTTON1=True)),
-    ("special", _mask(BUTTON2=True)),
-    ("shield", _mask(SHIELD=True)),
-    ("grab", _mask(GRAB=True)),
-    ("left_jump", _mask(LEFT=True, JUMP=True)),
-    ("right_jump", _mask(RIGHT=True, JUMP=True)),
-    ("left_attack", _mask(LEFT=True, BUTTON1=True)),
-    ("right_attack", _mask(RIGHT=True, BUTTON1=True)),
-    ("left_special", _mask(LEFT=True, BUTTON2=True)),
-    ("right_special", _mask(RIGHT=True, BUTTON2=True)),
-    ("jump_attack", _mask(JUMP=True, BUTTON1=True)),
-    ("jump_special", _mask(JUMP=True, BUTTON2=True)),
-    ("down_attack", _mask(DOWN=True, BUTTON1=True)),
-    ("up_attack", _mask(UP=True, BUTTON1=True)),
-    ("cstick_attack", _mask(C_RIGHT=True)),
-]
-
-ACTION_NAMES = [name for name, _ in ACTION_TABLE]
-ACTION_MASKS = [mask for _, mask in ACTION_TABLE]
-
-# Observation layout (mirrors _char_vec / _obs ordering) ----------------------
-CHAR_FEATURES = [
-    "x", "y", "nxs", "nys", "facing", "damage", "stocks", "ground",
-    "jumpCount", "shieldPower", "shielding", "hitstun", "attacking",
-    "atkExec", "hanging", "dead",
-]
-
-
-def obs_feature_names() -> list[str]:
-    """Human-readable name for each index of the 38-dim observation vector."""
-    return (
-        [f"me_{f}" for f in CHAR_FEATURES]
-        + [f"opp_{f}" for f in CHAR_FEATURES]
-        + ["rel_dx", "rel_dy", "rel_dist", "facing_align", "frame", "paused"]
-    )
+# The action table lives in ssf2_rl.actions (shared with the bot layer);
+# observation layout lives in ssf2_rl.obs. ACTION_TABLE / ACTION_NAMES /
+# ACTION_MASKS / CHAR_FEATURES / obs_feature_names are re-exported above
+# for backwards compatibility.
 
 
 class SSF2Env(gym.Env):
@@ -107,9 +58,11 @@ class SSF2Env(gym.Env):
         reward_scale: float = 1.0,
         ko_bonus: float = 10.0,
         config: Optional[dict] = None,
+        auto_launch: bool = True,
     ) -> None:
         self._host = host
         self._port = port
+        self.auto_launch = auto_launch
         self.agent_player = agent_player
         self.max_episode_frames = max_episode_frames
         self.step_timeout = step_timeout
@@ -122,14 +75,16 @@ class SSF2Env(gym.Env):
         self._frames_in_episode = 0
 
         # Observation: agent(16) + opponent(16) + relative(4) + match(2)
-        n_obs = 16 + 16 + 4 + 2
-        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(n_obs,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
+        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(OBS_DIM,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
         self.action_space = spaces.Discrete(len(ACTION_TABLE)) # TODO: should I use multibinary spaces, or do I need to use the bit mask?
 
     # -- lifecycle -----------------------------------------------------------
 
     def _connect(self) -> SSF2Bridge:
         if self._bridge is None:
+            if self.auto_launch:
+                # Start the game if it isn't running yet; no-op otherwise.
+                ensure_game_running(self._host, self._port)
             self._bridge = SSF2Bridge(self._host, self._port, timeout=15.0)
             self._bridge.connect()
         return self._bridge
@@ -183,49 +138,13 @@ class SSF2Env(gym.Env):
         return bridge.wait_state(timeout=5.0)
 
     def _chars(self, state: dict):
-        chars = {c["id"]: c for c in state["chars"]}
-        me = chars.get(self.agent_player)
-        opp_id = next((cid for cid in chars if cid != self.agent_player), None)
-        return me, chars.get(opp_id)
+        return pick_chars(state, self.agent_player)
 
     def _any_ko(self, state: dict) -> bool:
         return any(c["stocks"] <= 0 for c in state["chars"])
 
-    def _char_vec(self, c: dict) -> list[float]:
-        return [
-            _norm(c["x"], _POS), _norm(c["y"], _POS),
-            _norm(c["nxs"], _VEL), _norm(c["nys"], _VEL),
-            1.0 if c["facing"] else -1.0,
-            _norm(c["damage"], _DMG),
-            _norm(c["stocks"], 5.0),
-            1.0 if c["ground"] else -1.0,
-            _norm(c["jumpCount"], 3.0),
-            _norm(c["shieldPower"], 100.0),
-            1.0 if c["shielding"] else -1.0,
-            1.0 if c["hitstun"] else -1.0,
-            1.0 if c["atkFrame"] else -1.0,
-            _norm(c["atkExec"], 60.0),
-            1.0 if c["hanging"] else -1.0,
-            1.0 if c["dead"] else -1.0,
-        ]
-
     def _obs(self, state: dict) -> np.ndarray:
-        me, opp = self._chars(state)
-        if me is None or opp is None:
-            return np.zeros(self.observation_space.shape, dtype=np.float32)
-        dx = opp["x"] - me["x"]
-        dy = opp["y"] - me["y"]
-        dist = math.sqrt(dx * dx + dy * dy)
-        vec = (
-            self._char_vec(me)
-            + self._char_vec(opp)
-            + [
-                _norm(dx, _POS), _norm(dy, _POS), _norm(dist, _POS),
-                1.0 if (dx >= 0) == bool(me["facing"]) else -1.0,
-            ]
-            + [_norm(state["frame"], 1e5), 1.0 if state["paused"] else -1.0]
-        )
-        return np.asarray(vec, dtype=np.float32)
+        return build_obs(state, self.agent_player)
 
     def _info(self, state: dict) -> dict:
         me, opp = self._chars(state)
@@ -236,18 +155,7 @@ class SSF2Env(gym.Env):
         }
 
     def _reward(self, prev: dict, cur: dict) -> float:
-        pme, popp = self._chars(prev)
-        me, opp = self._chars(cur)
-        if pme is None or popp is None or me is None or opp is None:
-            return 0.0
-        r = 0.0
-        # Damage dealt is good; damage taken is bad.
-        r += (opp["damage"] - popp["damage"]) / 10.0
-        r -= (me["damage"] - pme["damage"]) / 10.0
-        # Stock changes (KOs).
-        r += (popp["stocks"] - opp["stocks"]) * self.ko_bonus
-        r -= (pme["stocks"] - me["stocks"]) * self.ko_bonus
-        return r * self.reward_scale
+        return reward_delta(prev, cur, self.agent_player, ko_bonus=self.ko_bonus) * self.reward_scale
 
 
 # Register so users can `gym.make("SSF2-v0")` after importing ssf2_rl.env.
