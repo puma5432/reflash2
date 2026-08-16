@@ -15,6 +15,16 @@ from .launcher import (
     port_open,
     stop_game,
 )
+from .players import (
+    CHARACTERS,
+    STAGES,
+    CPU,
+    Human,
+    Player,
+    build_match_config,
+    describe_matchup,
+)
+from .bots import Agent, Bot, FollowBot, PolicyBot, ScriptedBot, ZeroBot
 from .obs import (
     CHAR_FEATURES,
     OBS_DIM,
@@ -37,6 +47,19 @@ __all__ = [
     "game_log_path",
     "port_open",
     "stop_game",
+    "CHARACTERS",
+    "STAGES",
+    "CPU",
+    "Human",
+    "Player",
+    "build_match_config",
+    "describe_matchup",
+    "Agent",
+    "Bot",
+    "FollowBot",
+    "PolicyBot",
+    "ScriptedBot",
+    "ZeroBot",
     "ACTION_TABLE",
     "ACTION_NAMES",
     "ACTION_MASKS",

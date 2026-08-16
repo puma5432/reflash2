@@ -9,7 +9,7 @@ optional dependency — any callable works.
 
 from __future__ import annotations
 
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -32,15 +32,18 @@ class PolicyBot(Bot):
 
     Example (random policy)::
 
-        PolicyBot(lambda obs: np.random.randint(len(ACTION_NAMES)))
+        PolicyBot("marth", lambda obs: np.random.randint(len(ACTION_NAMES)))
 
     Example (torch, later)::
 
         net = torch.load("policy.pt")
-        PolicyBot(lambda obs: int(net(torch.from_numpy(obs)).argmax()))
+        PolicyBot("marth", lambda obs: int(net(torch.from_numpy(obs)).argmax()))
     """
 
-    def __init__(self, policy: Policy, name: str = "policy") -> None:
+    def __init__(self, character: Optional[str] = None, policy: Policy = None, name: str = "policy") -> None:
+        super().__init__(character)
+        if policy is None:
+            raise ValueError("PolicyBot requires a policy=")
         self._policy = policy
         self.name = name
 

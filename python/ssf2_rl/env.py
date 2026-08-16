@@ -11,7 +11,7 @@ local VS match (auto-started by the instrumented build).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -22,8 +22,10 @@ except ImportError as exc:  # pragma: no cover
     raise ImportError("pip install 'ssf2-rl[rl]' (gymnasium) to use SSF2Env") from exc
 
 from .actions import ACTION_TABLE, ACTION_NAMES, ACTION_MASKS
+from .bots.base import Agent, Bot
 from .bridge import SSF2Bridge, BridgeError
 from .launcher import ensure_game_running
+from .players import CPU, Human, Player, build_match_config, describe_matchup
 from .obs import (
     CHAR_FEATURES,
     OBS_DIM,
@@ -59,6 +61,9 @@ class SSF2Env(gym.Env):
         ko_bonus: float = 10.0,
         config: Optional[dict] = None,
         auto_launch: bool = True,
+        players: Optional[dict[int, Player]] = None,
+        stage: str = "finaldestination",
+        lives: int = 99,
     ) -> None:
         self._host = host
         self._port = port
@@ -69,10 +74,21 @@ class SSF2Env(gym.Env):
         self.reward_scale = reward_scale
         self.ko_bonus = ko_bonus
         self.config = config
+        self.stage = stage
+        self.lives = lives
+        # Default matchup: the agent slot is step-driven (Agent), the
+        # opponent is the in-game CPU at level 0 (docile).
+        self.players: dict[int, Player] = players or {
+            1: Agent("marth"),
+            2: CPU("samus", level=0),
+        }
+        self._validate_players(self.players, agent_player)
 
         self._bridge: Optional[SSF2Bridge] = None
         self._last_state: Optional[dict] = None
+        self._last_masks: dict[int, int] = {}
         self._frames_in_episode = 0
+        self._dropped_frames = 0  # frames the loop missed (see run())
 
         # Observation: agent(16) + opponent(16) + relative(4) + match(2)
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(OBS_DIM,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
@@ -89,25 +105,101 @@ class SSF2Env(gym.Env):
             self._bridge.connect()
         return self._bridge
 
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
+        players: Optional[dict[int, Player]] = None,
+        stage: Optional[str] = None,
+    ):
+        """Restart the match and take over the bot slots.
+
+        Args:
+            players: optional per-reset override of the slot declarations
+                (e.g. ``{1: Agent("marth"), 2: CPU("samus", level=0)}``).
+            stage: optional per-reset stage override (see ``players.STAGES``).
+        """
         super().reset(seed=seed)
+        if players is not None:
+            self._validate_players(players, self.agent_player)
+            self.players = players
+        if stage is not None:
+            self.stage = stage
+
         bridge = self._connect()
-        # Restart the match for a fresh episode.
-        bridge.restart_match(self.config)
+        # Build the match config from the declarations (unless a raw config
+        # was passed to the constructor, which still takes precedence).
+        config = self.config or build_match_config(
+            self.players, stage=self.stage, lives=self.lives
+        )
+        # Make sure the current match is actually running before restarting;
+        # restarting mid-load (e.g. right after auto-launch) crashes the game.
+        bridge.wait_state(timeout=30.0)
+        bridge.restart_match(config)
         # Wait for a brand-new state stream (frame counter resets to ~0).
         state = self._wait_for_new_match(bridge)
         self._last_state = state
         self._frames_in_episode = 0
-        # Take over the agent's slot so we can drive it.
-        bridge.takeover(self.agent_player)
+        # Take over every non-Human slot. For Bot slots this lets the bridge
+        # drive them; for CPU slots it is idempotent (already-CPU slots are
+        # untouched) but required on slot 1, which the game's match config
+        # always creates as human-controlled.
+        for pid, decl in self.players.items():
+            if isinstance(decl, Human):
+                continue
+            bridge.takeover(pid)
+            if isinstance(decl, Bot):
+                # Hold nothing until the first step(): without this, the
+                # native CPU AI would fill any frame with no queued override.
+                bridge.send_input(pid, 0)
+                decl.reset()
+                decl.on_match_start(state)
         return self._obs(state), self._info(state)
 
-    def step(self, action: int):
+    def step(self, action: Optional[Union[int, dict[int, int]]] = None):
+        """Advance exactly one game frame.
+
+        Args:
+            action: the agent slot's action. Three forms:
+                - ``int``: an index into ``ACTION_NAMES`` (the RL path).
+                - ``None``: the agent slot holds nothing (mask 0); useful
+                  when the agent is a ``Human`` or you're just ticking bots.
+                - ``dict``: explicit per-slot actions ``{pid: action_index}``
+                  for full visibility (overrides the agent + any bot slot).
+
+        Every taken-over (Bot) slot gets an explicit mask every frame — the
+        default is 0, so a Bot slot never silently reverts to the in-game
+        CPU and "controls == 0" always means Python is driving.
+        """
         bridge = self._connect()
-        mask = ACTION_MASKS[int(action) % len(ACTION_MASKS)]
-        bridge.send_input(self.agent_player, mask)
         prev = self._last_state
+        if prev is None:
+            raise BridgeError("call reset() before step()")
+        masks: dict[int, int] = {}
+        for pid, decl in self.players.items():
+            if not isinstance(decl, Bot):
+                continue  # Human/CPU slots get no Python input
+            if isinstance(action, dict):
+                if pid in action:
+                    mask = ACTION_MASKS[int(action[pid]) % len(ACTION_MASKS)]
+                else:
+                    mask = int(decl.act(prev, pid))
+            elif pid == self.agent_player and action is not None:
+                mask = ACTION_MASKS[int(action) % len(ACTION_MASKS)]
+            else:
+                # No explicit action for this slot: its own bot decides
+                # (Agent.act() returns 0, i.e. hold nothing).
+                mask = int(decl.act(prev, pid))
+            masks[pid] = mask
+            bridge.send_input(pid, mask)
+        self._last_masks = masks
         state = bridge.wait_state(timeout=self.step_timeout, min_frame=prev["frame"] + 1)
+        # Dropped-frame accounting: if the game advanced more than one frame
+        # while we were working, our bots missed the frames in between.
+        gap = state["frame"] - prev["frame"] - 1
+        if gap > 0:
+            self._dropped_frames += gap
         self._last_state = state
         self._frames_in_episode += 1
 
@@ -116,10 +208,71 @@ class SSF2Env(gym.Env):
         truncated = self._frames_in_episode >= self.max_episode_frames
         return self._obs(state), reward, terminated, truncated, self._info(state)
 
+    def run(
+        self,
+        frames: Optional[int] = None,
+        until_done: bool = False,
+        record: bool = False,
+    ) -> dict[int, list[dict]]:
+        """Real-time evaluation loop: ticks the game at its normal 30 FPS.
+
+        The loop is paced by the game itself (each ``step()`` blocks until
+        the next frame arrives), so the match plays at full speed while you
+        watch/play. Bots on non-agent slots are ticked automatically; a
+        ``Human`` agent slot means you play in the game window.
+
+        Args:
+            frames: maximum number of frames to run (None = unlimited).
+            until_done: also stop early when the match ends / a stock hits 0.
+            record: collect per-bot-slot trajectory dicts
+                (``state``, ``obs``, ``mask``, ``reward``) for each frame.
+
+        Returns:
+            ``{player_id: [frame records]}`` when ``record`` else ``{}``.
+        """
+        if frames is None and not until_done:
+            raise ValueError("pass frames=N and/or until_done=True")
+        bot_slots = [pid for pid, d in self.players.items() if isinstance(d, Bot)]
+        traj: dict[int, list[dict]] = {p: [] for p in bot_slots} if record else {}
+        n = 0
+        while frames is None or n < frames:
+            prev = self._last_state
+            obs, reward, terminated, truncated, info = self.step()
+            if record:
+                state = self._last_state
+                for pid in bot_slots:
+                    traj[pid].append({
+                        "state": prev,
+                        "obs": build_obs(prev, pid),
+                        "mask": self._last_masks.get(pid, 0),
+                        "reward": reward_delta(prev, state, pid, ko_bonus=self.ko_bonus),
+                    })
+            n += 1
+            if (terminated or truncated) and until_done:
+                break
+        print(f"run(): {n} frames, {self._dropped_frames} dropped")
+        return traj
+
     def close(self) -> None:
         if self._bridge is not None:
             self._bridge.close()
             self._bridge = None
+
+    def describe_matchup(self) -> str:
+        """One-table summary of who controls every slot (and the stage)."""
+        return describe_matchup(self.players, stage=self.stage)
+
+    @staticmethod
+    def _validate_players(players: dict[int, Player], agent_player: int) -> None:
+        """Check the matchup: the agent slot must exist.
+
+        The agent slot anchors observations/rewards and receives the
+        ``step(action)`` input. Any declaration is allowed there: an
+        ``Agent``/``Bot`` is driven by Python, a ``CPU``/``Human`` just
+        plays natively (spectating / play-it-yourself matchups).
+        """
+        if agent_player not in players:
+            raise ValueError(f"agent_player={agent_player} has no player declaration")
 
     # -- helpers -------------------------------------------------------------
 

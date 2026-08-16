@@ -9,7 +9,7 @@ play; use ``PolicyBot`` for learned behavior.
 
 from __future__ import annotations
 
-from typing import Literal, Sequence
+from typing import Literal, Optional, Sequence
 
 from ..actions import ACTION_NAMES, ACTION_MASKS
 from .base import Bot
@@ -28,15 +28,17 @@ class ScriptedBot(Bot):
 
     Example::
 
-        ScriptedBot([("right", 200), ("down_special", 20), ("shield", 15)])
+        ScriptedBot("marth", [("right", 200), ("down_special", 20), ("shield", 15)])
     """
 
     def __init__(
         self,
-        script: Sequence[tuple[str, int]],
+        character: Optional[str] = None,
+        script: Sequence[tuple[str, int]] = (),
         on_end: Literal["hold", "noop", "loop"] = "hold",
         name: str = "scripted",
     ) -> None:
+        super().__init__(character)
         if not script:
             raise ValueError("script must contain at least one entry")
         if on_end not in ("hold", "noop", "loop"):
