@@ -247,6 +247,7 @@ class SSF2Env(gym.Env):
         while frames is None or n < frames:
             prev = self._last_state
             obs, reward, terminated, truncated, info = self.step()
+
             if record:
                 state = self._last_state
                 for pid in bot_slots:

@@ -7,6 +7,9 @@ edges from consecutive masks itself.
 
 from __future__ import annotations
 
+#: No input held (mask 0). Named so scripts read uniformly: ``(NOOP, 30)``.
+NOOP = 0
+
 # Bit constants (must match ControlsObject.as exactly)
 START = 1 << 3
 TAUNT = 1 << 2

@@ -9,7 +9,7 @@ Bot types:
     ``Agent``       the step-driven RL slot (``env.step(action)`` supplies masks)
     ``ZeroBot``     always sends no input (stand still)
     ``FollowBot``   walks toward the opponent (observation sanity check)
-    ``ScriptedBot`` plays a fixed ``(action_name, frames)`` sequence
+    ``ScriptedBot`` plays a fixed ``(mask, frames)`` sequence of controls masks
     ``PolicyBot``   wraps any callable obs -> action (neural nets / RL)
 """
 

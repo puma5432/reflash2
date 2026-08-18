@@ -1,41 +1,45 @@
-"""Deterministic frame-script bot: plays a fixed (action_name, frames) list.
+"""Deterministic frame-script bot: plays a fixed (mask, frames) list.
 
-The script vocabulary is the named action table from ``ssf2_rl.actions``
-(``ACTION_NAMES`` / ``ACTION_MASKS``), so anything you can express as a
-single discrete action — idle, movement, jumps, attacks, combos — can be
-sequenced here. Scripts are for testing and simple commands, not autonomous
-play; use ``PolicyBot`` for learned behavior.
+Each entry holds a raw controls mask (bit constants from
+``ssf2_rl.controls``) for that many frames, so any combination of held
+buttons / stick directions can be sequenced — e.g. ``(DOWN | SPECIAL, 20)``
+for a down-special, ``(NOOP, 150)`` to wait. Scripts are for testing and
+simple commands, not autonomous play; use ``PolicyBot`` for learned
+behavior.
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import Literal, Sequence
 
-from ..actions import ACTION_NAMES, ACTION_MASKS
+from ..controls import ALL_BITS, describe_mask
 from ..players import CharLike
 from .base import Bot
 
 
 class ScriptedBot(Bot):
-    """Replays a list of ``(action_name, frames)`` entries, one mask per frame.
+    """Replays a list of ``(mask, frames)`` entries, one controls mask per frame.
 
     Args:
-        script: sequence of ``(action_name, frames)`` tuples. Names must be
-            in ``ACTION_NAMES``; frame counts must be positive ints.
+        script: sequence of ``(mask, frames)`` tuples. Masks are controls
+            bit masks composed from the constants in ``ssf2_rl.controls``
+            (e.g. ``LEFT``, ``DOWN | SPECIAL``, ``NOOP``); frame counts
+            must be positive ints.
         on_end: what to do once the script is exhausted:
-            ``"hold"`` keep the last action's mask (default),
+            ``"hold"`` keep the last entry's mask (default),
             ``"noop"`` send no input,
             ``"loop"`` restart the script from the beginning.
 
     Example::
 
-        ScriptedBot(Character.Marth, [("right", 200), ("down_special", 20), ("shield", 15)])
+        ScriptedBot(Character.Marth, [(NOOP, 150), (RIGHT, 200), (DOWN | SPECIAL, 20), (SHIELD, 15)])
     """
 
     def __init__(
         self,
         character: CharLike = None,
-        script: Sequence[tuple[str, int]] = (),
+        script: Sequence[tuple[int, int]] = (),
         on_end: Literal["hold", "noop", "loop"] = "hold",
         name: str = "scripted",
     ) -> None:
@@ -46,15 +50,24 @@ class ScriptedBot(Bot):
             raise ValueError(f"on_end must be hold/noop/loop, got {on_end!r}")
         self._entries: list[tuple[int, int]] = []
         for entry in script:
-            action_name, frames = entry
-            if action_name not in ACTION_NAMES:
-                raise ValueError(
-                    f"unknown action {action_name!r}; valid: {ACTION_NAMES}"
+            mask, frames = entry
+            if isinstance(mask, str):
+                raise TypeError(
+                    f"script entries take controls masks (ints), not action "
+                    f"names; got {mask!r}. Use bit constants, e.g. DOWN | SPECIAL."
+                )
+            mask = int(mask)
+            stray = mask & ~ALL_BITS
+            if stray:
+                warnings.warn(
+                    f"script mask {mask:#x} has bits outside the 22-bit "
+                    f"ControlsObject layout (ignored by the game): "
+                    f"{describe_mask(stray)}"
                 )
             frames = int(frames)
             if frames <= 0:
                 raise ValueError(f"frame count must be positive, got {frames}")
-            self._entries.append((ACTION_MASKS[ACTION_NAMES.index(action_name)], frames))
+            self._entries.append((mask, frames))
         self.on_end = on_end
         self.name = name
         self._cursor = 0       # index into self._entries
