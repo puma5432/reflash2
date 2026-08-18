@@ -5,9 +5,9 @@ A ``Player`` declares WHO occupies a slot. Three kinds:
 - ``Human``  — a physical controller; never taken over.
 - ``CPU``    — the in-game AI at a level; never driven by Python.
 - ``Bot``    — taken over by the bridge and driven from Python. Bots ARE
-  their declaration (see ``ssf2_rl.bots``): ``FollowBot("samus")`,
-  ``ScriptedBot("marth", script)``, ``ZeroBot("samus")``, or ``Agent("marth")``
-  for the step-driven RL slot.
+  their declaration (see ``ssf2_rl.bots``): ``FollowBot(Character.Samus)``,
+  ``ScriptedBot(Character.Marth, script)``, ``ZeroBot(Character.Samus)``, or
+  ``Agent(Character.Marth)`` for the step-driven RL slot.
 
 Unlike Slippi there is no "menuing" branch: SSF2 matches are configured via
 the restart-match JSON (see ``rlStartVSMatch`` in tools/rl/ModAPI_patched.as),
@@ -16,17 +16,21 @@ so declarations translate directly into that config via ``build_match_config``.
 Example::
 
     players = {
-        1: ScriptedBot("marth", script),
-        2: CPU("samus", level=0),
+        1: ScriptedBot(Character.Marth, script),
+        2: CPU(Character.Samus, level=0),
     }
-    config = build_match_config(players, stage="battlefield")
+    config = build_match_config(players, stage=Stage.Battlefield)
+
+Plain strings (``"marth"``, ``"battlefield"``) are still accepted wherever
+an enum member is.
 """
 
 from __future__ import annotations
 
 import abc
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 # Repo root: .../reflash2/python/ssf2_rl/players.py -> parents[2]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,16 +53,128 @@ STAGES: frozenset[str] = _data_ids("stage") | {RANDOM}
 CHARACTERS: frozenset[str] = _data_ids("character") | {RANDOM}
 
 
+class Character(str, Enum):
+    """Playable characters (values are the build/data/character/*.ssf ids).
+
+    Every id in ``CHARACTERS`` has a member; ``Character.Random`` maps to
+    the game-side random pick. Plain strings are still accepted wherever a
+    ``Character`` is.
+    """
+
+    BandanaDee = "bandanadee"
+    BlackMage = "blackmage"
+    Bomberman = "bomberman"
+    Bowser = "bowser"
+    CaptainFalcon = "captainfalcon"
+    ChibiRobo = "chibirobo"
+    Dedede = "dedede"
+    DonkeyKong = "donkeykong"
+    Falco = "falco"
+    Fox = "fox"
+    GameAndWatch = "gameandwatch"
+    Ganondorf = "ganondorf"
+    Goku = "goku"
+    Ichigo = "ichigo"
+    Isaac = "isaac"
+    Jigglypuff = "jigglypuff"
+    Kirby = "kirby"
+    Krystal = "krystal"
+    Link = "link"
+    Lloyd = "lloyd"
+    Lucario = "lucario"
+    Luffy = "luffy"
+    Luigi = "luigi"
+    Mario = "mario"
+    Marth = "marth"
+    MegaMan = "megaman"
+    MetaKnight = "metaknight"
+    Naruto = "naruto"
+    Ness = "ness"
+    PacMan = "pacman"
+    Peach = "peach"
+    Pichu = "pichu"
+    Pikachu = "pikachu"
+    Pit = "pit"
+    Rayman = "rayman"
+    Ryu = "ryu"
+    Samus = "samus"
+    Sandbag = "sandbag"
+    Simon = "simon"
+    Sonic = "sonic"
+    Sora = "sora"
+    Tails = "tails"
+    Waluigi = "waluigi"
+    Wario = "wario"
+    Yoshi = "yoshi"
+    ZeroSuitSamus = "zamus"
+    Zelda = "zelda"
+    Random = RANDOM
+
+
+class Stage(str, Enum):
+    """Curated stage picks for research matches (values are data ids).
+
+    Only the stages commonly used for experiments are members; any other id
+    in ``STAGES`` can still be passed as a plain string. ``Stage.Random``
+    maps to the game-side random pick.
+    """
+
+    Battlefield = "battlefield"
+    MMBattlefield = "battlefield2"  # Multi-Man Battlefield
+    FinalDestination = "finaldestination"
+    WaitingRoom = "waitingroom"
+    YoshisStory = "yoshisstory"
+    Warioware = "warioware"
+    PokemonColosseum = "pokemoncolosseum"
+    DreamLand = "dreamland"
+    RainbowRoute = "rainbowroute"
+    TowerOfSalvation = "towerofsalvation"
+    Smashville = "smashville"
+
+    bf = "battlefield"
+    bf2 = "battlefield2"  # Multi-Man Battlefield
+    fd = "finaldestination"
+    wr = "waitingroom"
+    ys = "yoshisstory"
+    ww = "warioware"
+    pc = "pokemoncolosseum"
+    dl = "dreamland"
+    rr = "rainbowroute"
+    tos = "towerofsalvation"
+    sv = "smashville"
+
+    Random = RANDOM
+
+
+#: What a character declaration accepts: enum member, raw id, or None.
+CharLike = Union[Character, str, None]
+#: What a stage declaration accepts: enum member or raw id.
+StageLike = Union[Stage, str]
+
+
+def _char_id(character: CharLike) -> Optional[str]:
+    """Normalize a character declaration to its raw data id (or None)."""
+    if character is None:
+        return None
+    return character.value if isinstance(character, Character) else str(character)
+
+
+def _stage_id(stage: StageLike) -> str:
+    """Normalize a stage declaration to its raw data id."""
+    return stage.value if isinstance(stage, Stage) else str(stage)
+
+
 class Player(abc.ABC):
     """Declares who occupies one player slot."""
 
-    def __init__(self, character: Optional[str] = None) -> None:
-        if character is not None and character not in CHARACTERS:
+    def __init__(self, character: CharLike = None) -> None:
+        char = _char_id(character)
+        if char is not None and char not in CHARACTERS:
             raise ValueError(
-                f"unknown character {character!r}; "
+                f"unknown character {char!r}; "
                 f"valid: {sorted(CHARACTERS - {RANDOM})} or {RANDOM!r}"
             )
-        self.character = character
+        self.character = char
 
     @abc.abstractmethod
     def describe(self) -> str:
@@ -84,7 +200,7 @@ class CPU(Player):
     CPUs share the same level (see rlStartVSMatch).
     """
 
-    def __init__(self, character: Optional[str] = None, level: int = 9) -> None:
+    def __init__(self, character: CharLike = None, level: int = 9) -> None:
         super().__init__(character)
         if not 0 <= int(level) <= 9:
             raise ValueError(f"CPU level must be 0..9, got {level}")
@@ -97,7 +213,7 @@ class CPU(Player):
 
 def build_match_config(
     players: dict[int, Player],
-    stage: str = "finaldestination",
+    stage: StageLike = "finaldestination",
     lives: int = 99,
     using_time: bool = False,
     time: int = 99,
@@ -107,7 +223,7 @@ def build_match_config(
     Args:
         players: slot id (1-based) -> declaration. Must cover slots 1..N
             contiguously with at least 2 entries.
-        stage: stage id (see ``STAGES``).
+        stage: stage id or ``Stage`` member (see ``STAGES``).
         lives: stock count.
         using_time / time: match timer.
 
@@ -120,6 +236,7 @@ def build_match_config(
     ids = sorted(players)
     if ids != list(range(1, len(ids) + 1)):
         raise ValueError(f"player ids must be contiguous from 1, got {ids}")
+    stage = _stage_id(stage)
     if stage not in STAGES:
         raise ValueError(
             f"unknown stage {stage!r}; valid: {sorted(STAGES - {RANDOM})} or {RANDOM!r}"
@@ -141,11 +258,11 @@ def build_match_config(
     }
 
 
-def describe_matchup(players: dict[int, Player], stage: Optional[str] = None) -> str:
+def describe_matchup(players: dict[int, Player], stage: Optional[StageLike] = None) -> str:
     """One-table summary of who controls every slot."""
     lines = []
     if stage:
-        lines.append(f"stage: {stage}")
+        lines.append(f"stage: {_stage_id(stage)}")
     for pid in sorted(players):
         lines.append(f"P{pid}: {players[pid].describe()}")
     return "\n".join(lines)

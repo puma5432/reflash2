@@ -25,7 +25,15 @@ from .actions import ACTION_TABLE, ACTION_NAMES, ACTION_MASKS
 from .bots.base import Agent, Bot
 from .bridge import SSF2Bridge, BridgeError
 from .launcher import ensure_game_running
-from .players import CPU, Human, Player, build_match_config, describe_matchup
+from .players import (
+    CPU,
+    Character,
+    Human,
+    Player,
+    Stage,
+    build_match_config,
+    describe_matchup,
+)
 from .obs import (
     CHAR_FEATURES,
     OBS_DIM,
@@ -62,7 +70,7 @@ class SSF2Env(gym.Env):
         config: Optional[dict] = None,
         auto_launch: bool = True,
         players: Optional[dict[int, Player]] = None,
-        stage: str = "finaldestination",
+        stage: Union[str, Stage] = "finaldestination",
         lives: int = 99,
     ) -> None:
         self._host = host
@@ -79,8 +87,8 @@ class SSF2Env(gym.Env):
         # Default matchup: the agent slot is step-driven (Agent), the
         # opponent is the in-game CPU at level 0 (docile).
         self.players: dict[int, Player] = players or {
-            1: Agent("marth"),
-            2: CPU("samus", level=0),
+            1: Agent(Character.Marth),
+            2: CPU(Character.Samus, level=0),
         }
         self._validate_players(self.players, agent_player)
 
@@ -111,14 +119,15 @@ class SSF2Env(gym.Env):
         seed: Optional[int] = None,
         options: Optional[dict] = None,
         players: Optional[dict[int, Player]] = None,
-        stage: Optional[str] = None,
+        stage: Optional[Union[str, Stage]] = None,
     ):
         """Restart the match and take over the bot slots.
 
         Args:
             players: optional per-reset override of the slot declarations
-                (e.g. ``{1: Agent("marth"), 2: CPU("samus", level=0)}``).
-            stage: optional per-reset stage override (see ``players.STAGES``).
+                (e.g. ``{1: Agent(Character.Marth), 2: CPU(Character.Samus, level=0)}``).
+            stage: optional per-reset stage override — a ``Stage`` member or
+                raw id (see ``players.STAGES``).
         """
         super().reset(seed=seed)
         if players is not None:

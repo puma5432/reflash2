@@ -14,11 +14,9 @@ training path); ``ZeroBot``/``FollowBot`` live here, ``ScriptedBot`` and
 
 from __future__ import annotations
 
-from typing import Optional
-
 from ..actions import ACTION_MASKS, action_index
 from ..obs import pick_chars
-from ..players import Player
+from ..players import CharLike, Player
 
 
 class Bot(Player):
@@ -90,7 +88,7 @@ class FollowBot(Bot):
 
     name = "follow"
 
-    def __init__(self, character: Optional[str] = None, deadzone: float = 30.0) -> None:
+    def __init__(self, character: CharLike = None, deadzone: float = 30.0) -> None:
         super().__init__(character)
         if deadzone < 0:
             raise ValueError("deadzone must be >= 0")

@@ -9,9 +9,10 @@ play; use ``PolicyBot`` for learned behavior.
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Sequence
+from typing import Literal, Sequence
 
 from ..actions import ACTION_NAMES, ACTION_MASKS
+from ..players import CharLike
 from .base import Bot
 
 
@@ -28,12 +29,12 @@ class ScriptedBot(Bot):
 
     Example::
 
-        ScriptedBot("marth", [("right", 200), ("down_special", 20), ("shield", 15)])
+        ScriptedBot(Character.Marth, [("right", 200), ("down_special", 20), ("shield", 15)])
     """
 
     def __init__(
         self,
-        character: Optional[str] = None,
+        character: CharLike = None,
         script: Sequence[tuple[str, int]] = (),
         on_end: Literal["hold", "noop", "loop"] = "hold",
         name: str = "scripted",

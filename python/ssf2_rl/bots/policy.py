@@ -9,12 +9,13 @@ optional dependency — any callable works.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from typing import Callable, Union
 
 import numpy as np
 
 from ..actions import ACTION_NAMES, ACTION_MASKS
 from ..obs import build_obs
+from ..players import CharLike
 from .base import Bot
 
 #: A policy maps the 38-dim obs vector to an action index or action name.
@@ -32,15 +33,15 @@ class PolicyBot(Bot):
 
     Example (random policy)::
 
-        PolicyBot("marth", lambda obs: np.random.randint(len(ACTION_NAMES)))
+        PolicyBot(Character.Marth, lambda obs: np.random.randint(len(ACTION_NAMES)))
 
     Example (torch, later)::
 
         net = torch.load("policy.pt")
-        PolicyBot("marth", lambda obs: int(net(torch.from_numpy(obs)).argmax()))
+        PolicyBot(Character.Marth, lambda obs: int(net(torch.from_numpy(obs)).argmax()))
     """
 
-    def __init__(self, character: Optional[str] = None, policy: Policy = None, name: str = "policy") -> None:
+    def __init__(self, character: CharLike = None, policy: Policy = None, name: str = "policy") -> None:
         super().__init__(character)
         if policy is None:
             raise ValueError("PolicyBot requires a policy=")

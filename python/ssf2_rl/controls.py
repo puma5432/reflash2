@@ -8,30 +8,35 @@ edges from consecutive masks itself.
 from __future__ import annotations
 
 # Bit constants (must match ControlsObject.as exactly)
-TAP_JUMP = 1 << 0
-SHIELD = 1 << 1
-TAUNT = 1 << 2
 START = 1 << 3
-GRAB = 1 << 4
-SPECIAL = 1 << 5   # special
-ATTACK = 1 << 6   # attack
-JUMP = 1 << 7
-RIGHT = 1 << 8
+TAUNT = 1 << 2
+
 LEFT = 1 << 9
-DOWN = 1 << 10
+RIGHT = 1 << 8
 UP = 1 << 11
+DOWN = 1 << 10
 DT_DASH = 1 << 12
 AUTO_DASH = 1 << 13
 DASH = 1 << 14
-C_RIGHT = 1 << 15
-C_LEFT = 1 << 16
-C_DOWN = 1 << 17
-C_UP = 1 << 18
-JUMP2 = 1 << 19
+
+ATTACK = 1 << 6   # attack
+SPECIAL = 1 << 5   # special
+GRAB = 1 << 4
+SHIELD = 1 << 1
 SHIELD2 = 1 << 20
+
+TAP_JUMP = 1 << 0
+JUMP = 1 << 7
+JUMP2 = 1 << 19
 JUMP3 = 1 << 21
 
+C_LEFT = 1 << 16
+C_RIGHT = 1 << 15
+C_UP = 1 << 18
+C_DOWN = 1 << 17
+
 ALL_BITS = (1 << 22) - 1
+
 
 BITS = {
     "TAP_JUMP": TAP_JUMP,
