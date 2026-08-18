@@ -22,8 +22,8 @@ DT_DASH = 1 << 12
 AUTO_DASH = 1 << 13
 DASH = 1 << 14
 
-ATTACK = 1 << 6   # attack
-SPECIAL = 1 << 5   # special
+ATTACK = 1 << 5   # attack
+SPECIAL = 1 << 6   # special
 GRAB = 1 << 4
 SHIELD = 1 << 1
 SHIELD2 = 1 << 20
