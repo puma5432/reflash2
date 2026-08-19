@@ -72,8 +72,8 @@ package com.mcleodgaming.ssf2.modapi
       private static var _rlStateCount:int = 0;
 
       // Lockstep is opt-in for an external client. While enabled, pause and
-      // step commands use StageData's real pause state; no controller START
-      // input is synthesized. A pending step is completed in rlOnTick(),
+      // step commands use StageData's silent research pause, never the normal
+      // user pause lifecycle. A pending step is completed in rlOnTick(),
       // which re-pauses before the post-step snapshot is built.
       private static var _rlLockstep:Boolean = false;
 
@@ -99,6 +99,10 @@ package com.mcleodgaming.ssf2.modapi
       public static function deinit() : void
       {
          trace("[ENGINE ModAPI] deinit() called");
+         if(Boolean(_api) && Boolean(_api.ResearchPaused))
+         {
+            _api.setResearchPaused(false);
+         }
          _rlLockstep = false;
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
@@ -722,9 +726,9 @@ package com.mcleodgaming.ssf2.modapi
       private static function rlOnClientClose(param1:Event) : void
       {
          trace("[ModAPI RL] External agent disconnected.");
-         if(isReady() && _rlLockstep && _api.Paused)
+         if(isReady() && _rlLockstep && _api.ResearchPaused)
          {
-            _api.Paused = false;
+            _api.setResearchPaused(false);
          }
          _rlLockstep = false;
          _rlPauseAfterTick = false;
@@ -735,6 +739,13 @@ package com.mcleodgaming.ssf2.modapi
       private static function rlOnClientError(param1:Event) : void
       {
          trace("[ModAPI RL] Client socket error: " + param1.toString());
+         if(isReady() && _rlLockstep && _api.ResearchPaused)
+         {
+            _api.setResearchPaused(false);
+         }
+         _rlLockstep = false;
+         _rlPauseAfterTick = false;
+         _rlStepRequest = -1;
          _rlClient = null;
       }
 
@@ -836,7 +847,7 @@ package com.mcleodgaming.ssf2.modapi
          }
       }
 
-      /** Pause the simulation and return an acknowledged paused snapshot. */
+      /** Silently pause simulation and return an acknowledged paused snapshot. */
       private static function rlPause(param1:int) : void
       {
          if(!isReady())
@@ -844,12 +855,17 @@ package com.mcleodgaming.ssf2.modapi
             rlSend({"type":"error","request":param1,"command":"pause","message":"game is not ready"});
             return;
          }
+         if(_api.Paused && !_api.ResearchPaused)
+         {
+            rlSend({"type":"error","request":param1,"command":"pause","message":"normal user pause is active"});
+            return;
+         }
          _rlLockstep = true;
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
-         if(!_api.Paused)
+         if(!_api.ResearchPaused)
          {
-            _api.Paused = true;
+            _api.setResearchPaused(true);
          }
          rlSend({"type":"ack","request":param1,"command":"pause","state":rlBuildState()});
       }
@@ -857,14 +873,14 @@ package com.mcleodgaming.ssf2.modapi
       /** Permit exactly one game tick; rlOnTick() re-pauses and completes it. */
       private static function rlStep(param1:int) : void
       {
-         if(!isReady() || !_rlLockstep || !_api.Paused || _rlPauseAfterTick)
+         if(!isReady() || !_rlLockstep || !_api.ResearchPaused || _rlPauseAfterTick)
          {
             rlSend({"type":"error","request":param1,"command":"step","message":"step requires an idle lockstep pause"});
             return;
          }
          _rlStepRequest = param1;
          _rlPauseAfterTick = true;
-         _api.Paused = false;
+         _api.setResearchPaused(false);
       }
 
       /** Leave lockstep mode and resume normal simulation. */
@@ -878,9 +894,9 @@ package com.mcleodgaming.ssf2.modapi
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
          _rlLockstep = false;
-         if(_api.Paused)
+         if(_api.ResearchPaused)
          {
-            _api.Paused = false;
+            _api.setResearchPaused(false);
          }
          rlSend({"type":"ack","request":param1,"command":"resume","state":rlBuildState()});
       }
@@ -900,7 +916,7 @@ package com.mcleodgaming.ssf2.modapi
             var _loc2_:int = _rlStepRequest;
             _rlPauseAfterTick = false;
             _rlStepRequest = -1;
-            _api.Paused = true;
+            _api.setResearchPaused(true);
             var _loc3_:Object = rlBuildState();
             rlSend(_loc3_);
             rlSend({"type":"step_complete","request":_loc2_,"state":_loc3_});

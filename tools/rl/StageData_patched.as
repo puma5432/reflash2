@@ -20,7 +20,9 @@ package com.mcleodgaming.ssf2.engine
    import com.mcleodgaming.ssf2.util.*;
    import flash.display.*;
    import flash.events.*;
-   import flash.filesystem.*;
+   import flash.filesystem.File;
+   import flash.filesystem.FileMode;
+   import flash.filesystem.FileStream;
    import flash.geom.*;
    import flash.media.Sound;
    import flash.utils.*;
@@ -175,6 +177,10 @@ package com.mcleodgaming.ssf2.engine
       private var m_airDodge:String;
 
       private var m_paused:Boolean;
+
+      // Research lockstep pause bypasses the public Paused setter so each
+      // single-frame step does not churn the human pause UI/audio lifecycle.
+      private var m_researchPaused:Boolean;
 
       private var m_pausedLetGo:Boolean;
 
@@ -677,6 +683,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_replayFrameStep = false;
          this.m_zLetGo = true;
          this.m_paused = false;
+         this.m_researchPaused = false;
          this.m_paused_id = 0;
          this.m_fsCutscene = null;
          this.m_fsCutins = 0;
@@ -1310,36 +1317,27 @@ package com.mcleodgaming.ssf2.engine
          param3.ignoreFallthrough = typeof param3.ignoreFallthrough !== "undefined" ? param3.ignoreFallthrough : true;
          param3.ignoreList = param3.ignoreList || [];
          _loc4_ = 0;
-         while(true)
+         while(Boolean(param3.terrain) && _loc4_ < this.TERRAINS.length)
          {
             _loc5_ = Boolean(this.TERRAINS[_loc4_].hitTestPoint(param1,param2,true));
-            if(!(Boolean(param3.terrain) && Boolean(_loc4_ < this.TERRAINS.length) && (!_loc5_ || this.TERRAINS[_loc4_].fallthrough == true && !param3.ignoreFallthrough || param3.ignoreList.indexOf(this.TERRAINS[_loc4_]) >= 0)))
+            if(_loc5_ && !(this.TERRAINS[_loc4_].fallthrough == true && !param3.ignoreFallthrough) && param3.ignoreList.indexOf(this.TERRAINS[_loc4_]) < 0)
             {
-               break;
+               return this.TERRAINS[_loc4_];
             }
             _loc4_++;
-         }
-         if(_loc4_ < this.TERRAINS.length && _loc5_)
-         {
-            return this.TERRAINS[_loc4_];
          }
          if(param3.platforms)
          {
             _loc4_ = 0;
-            while(true)
+            while(_loc4_ < this.PLATFORMS.length)
             {
                _loc5_ = Boolean(this.PLATFORMS[_loc4_].hitTestPoint(param1,param2,true));
-               if(!(_loc4_ < this.PLATFORMS.length && (!_loc5_ || this.PLATFORMS[_loc4_].fallthrough == true && !param3.ignoreFallthrough || param3.ignoreList.indexOf(this.PLATFORMS[_loc4_]) >= 0)))
+               if(_loc5_ && !(this.PLATFORMS[_loc4_].fallthrough == true && !param3.ignoreFallthrough) && param3.ignoreList.indexOf(this.PLATFORMS[_loc4_]) < 0)
                {
-                  break;
+                  return this.PLATFORMS[_loc4_];
                }
                _loc4_++;
             }
-            if(_loc4_ < this.PLATFORMS.length && _loc5_)
-            {
-               return this.PLATFORMS[_loc4_];
-            }
-            return null;
          }
          return null;
       }
@@ -2812,6 +2810,10 @@ package com.mcleodgaming.ssf2.engine
          var _loc5_:Boolean = false;
          var _loc6_:int = 0;
          var _loc7_:int = 0;
+         if(this.m_researchPaused)
+         {
+            return;
+         }
          if(!this.m_gameEnded && !this.m_event && Boolean(ModeFeatures.hasFeature(ModeFeatures.ALLOW_PAUSE,this.GAME.GameMode)) && (Boolean(this.GAME.LevelData.pauseEnabled) || Boolean(this.REPLAYMODE)))
          {
             _loc1_ = false;
@@ -3114,11 +3116,14 @@ package com.mcleodgaming.ssf2.engine
          {
             if(this.Paused)
             {
-               _loc2_ = 0;
-               while(_loc2_ < this.CHARACTERS.length)
+               if(!this.m_researchPaused)
                {
-                  this.CHARACTERS[_loc2_].pauseControlChecks();
-                  _loc2_++;
+                  _loc2_ = 0;
+                  while(_loc2_ < this.CHARACTERS.length)
+                  {
+                     this.CHARACTERS[_loc2_].pauseControlChecks();
+                     _loc2_++;
+                  }
                }
             }
             else if(Boolean(this.m_gameEnded) && !this.m_slowFrameRate && Boolean(this.m_gameEndedExit))
@@ -4773,6 +4778,27 @@ package com.mcleodgaming.ssf2.engine
       public function get Paused() : Boolean
       {
          return this.m_paused;
+      }
+
+      /**
+       * Freezes or resumes simulation without invoking the user pause
+       * lifecycle (HUD, audio, rumble, pause sounds, or pause events).
+       * Intended exclusively for the RL lockstep bridge.
+       */
+      public function setResearchPaused(param1:Boolean) : void
+      {
+         if(this.m_researchPaused == param1)
+         {
+            return;
+         }
+         this.m_researchPaused = param1;
+         this.m_paused = param1;
+         this.m_justPaused = false;
+      }
+
+      public function get ResearchPaused() : Boolean
+      {
+         return this.m_researchPaused;
       }
 
       public function set Paused(param1:Boolean) : void
