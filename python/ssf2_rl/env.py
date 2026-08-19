@@ -69,6 +69,7 @@ class SSF2Env(gym.Env):
         ko_bonus: float = 10.0,
         config: Optional[dict] = None,
         auto_launch: bool = True,
+        lockstep: bool = False,
         players: Optional[dict[int, Player]] = None,
         stage: Union[str, Stage] = "finaldestination",
         lives: int = 99,
@@ -76,6 +77,7 @@ class SSF2Env(gym.Env):
         self._host = host
         self._port = port
         self.auto_launch = auto_launch
+        self.lockstep = bool(lockstep)
         self.agent_player = agent_player
         self.max_episode_frames = max_episode_frames
         self.step_timeout = step_timeout
@@ -97,6 +99,7 @@ class SSF2Env(gym.Env):
         self._last_masks: dict[int, int] = {}
         self._frames_in_episode = 0
         self._dropped_frames = 0  # frames the loop missed (see run())
+        self._lockstep_paused = False
 
         # Observation: agent(16) + opponent(16) + relative(4) + match(2)
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(OBS_DIM,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
@@ -148,8 +151,6 @@ class SSF2Env(gym.Env):
         bridge.restart_match(config)
         # Wait for a brand-new state stream (frame counter resets to ~0).
         state = self._wait_for_new_match(bridge)
-        self._last_state = state
-        self._frames_in_episode = 0
         # Take over every non-Human slot. For Bot slots this lets the bridge
         # drive them; for CPU slots it is idempotent (already-CPU slots are
         # untouched) but required on slot 1, which the game's match config
@@ -163,6 +164,19 @@ class SSF2Env(gym.Env):
                 # native CPU AI would fill any frame with no queued override.
                 bridge.send_input(pid, 0)
                 decl.reset()
+        if self.lockstep:
+            request = bridge.pause()
+            reply = bridge.wait_reply(request, "ack", timeout=self.step_timeout)
+            state = self._reply_state(reply, "pause")
+            if not state.get("paused"):
+                raise BridgeError("lockstep pause acknowledgement was not paused")
+            self._lockstep_paused = True
+        else:
+            self._lockstep_paused = False
+        self._last_state = state
+        self._frames_in_episode = 0
+        for decl in self.players.values():
+            if isinstance(decl, Bot):
                 decl.on_match_start(state)
         return self._obs(state), self._info(state)
 
@@ -185,6 +199,8 @@ class SSF2Env(gym.Env):
         prev = self._last_state
         if prev is None:
             raise BridgeError("call reset() before step()")
+        if self.lockstep and not self._lockstep_paused:
+            raise BridgeError("lockstep environment is not paused; call reset()")
         masks: dict[int, int] = {}
         for pid, decl in self.players.items():
             if not isinstance(decl, Bot):
@@ -203,12 +219,26 @@ class SSF2Env(gym.Env):
             masks[pid] = mask
             bridge.send_input(pid, mask)
         self._last_masks = masks
-        state = bridge.wait_state(timeout=self.step_timeout, min_frame=prev["frame"] + 1)
-        # Dropped-frame accounting: if the game advanced more than one frame
-        # while we were working, our bots missed the frames in between.
-        gap = state["frame"] - prev["frame"] - 1
-        if gap > 0:
-            self._dropped_frames += gap
+        if self.lockstep:
+            request = bridge.step_frame()
+            reply = bridge.wait_reply(request, "step_complete", timeout=self.step_timeout)
+            state = self._reply_state(reply, "step")
+            expected_frame = prev["frame"] + 1
+            if state.get("frame") != expected_frame:
+                raise BridgeError(
+                    f"lockstep step advanced from frame {prev['frame']} to "
+                    f"{state.get('frame')}, expected {expected_frame}"
+                )
+            if not state.get("paused"):
+                raise BridgeError("lockstep step completed without pausing the game")
+            self._lockstep_paused = True
+        else:
+            state = bridge.wait_state(timeout=self.step_timeout, min_frame=prev["frame"] + 1)
+            # Dropped-frame accounting: if the game advanced more than one frame
+            # while we were working, our bots missed the frames in between.
+            gap = state["frame"] - prev["frame"] - 1
+            if gap > 0:
+                self._dropped_frames += gap
         self._last_state = state
         self._frames_in_episode += 1
 
@@ -223,12 +253,12 @@ class SSF2Env(gym.Env):
         until_done: bool = False,
         record: bool = False,
     ) -> dict[int, list[dict]]:
-        """Real-time evaluation loop: ticks the game at its normal 30 FPS.
+        """Run a sequence of environment steps.
 
-        The loop is paced by the game itself (each ``step()`` blocks until
-        the next frame arrives), so the match plays at full speed while you
-        watch/play. Bots on non-agent slots are ticked automatically; a
-        ``Human`` agent slot means you play in the game window.
+        In normal mode, the loop is paced by the game (normally 30 FPS), so
+        you can watch or play a human slot in real time. In lockstep mode,
+        each iteration permits exactly one game frame and pauses it again;
+        the loop is therefore not interactive in real time.
 
         Args:
             frames: maximum number of frames to run (None = unlimited).
@@ -265,8 +295,15 @@ class SSF2Env(gym.Env):
 
     def close(self) -> None:
         if self._bridge is not None:
+            if self.lockstep and self._lockstep_paused:
+                try:
+                    request = self._bridge.resume()
+                    self._bridge.wait_reply(request, "ack", timeout=1.0)
+                except BridgeError:
+                    pass
             self._bridge.close()
             self._bridge = None
+        self._lockstep_paused = False
 
     def describe_matchup(self) -> str:
         """One-table summary of who controls every slot (and the stage)."""
@@ -313,9 +350,19 @@ class SSF2Env(gym.Env):
         me, opp = self._chars(state)
         return {
             "frame": state["frame"],
+            "paused": bool(state.get("paused")),
+            "lockstep": self.lockstep,
             "me": me,
             "opp": opp,
         }
+
+    @staticmethod
+    def _reply_state(reply: dict, command: str) -> dict:
+        """Extract and validate the state attached to a lockstep reply."""
+        state = reply.get("state")
+        if not isinstance(state, dict):
+            raise BridgeError(f"lockstep {command} reply did not include a state snapshot")
+        return state
 
     def _reward(self, prev: dict, cur: dict) -> float:
         return reward_delta(prev, cur, self.agent_player, ko_bonus=self.ko_bonus) * self.reward_scale

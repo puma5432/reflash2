@@ -8,11 +8,14 @@ Wire protocol (newline-delimited JSON, matches tools/rl/ModAPI_patched.as):
     {"type":"match_end"}   (ModAPI.deinit - match torn down)
     {"type":"game_ended"}  (match reached an end condition)
 
-  client -> game:
+    client -> game:
     {"type":"input","player":P,"bits":M}    one frame of held input
     {"type":"takeover","player":P}          convert slot P to CPU control
     {"type":"ping"}                          -> {"type":"pong"}
     {"type":"state"}                         -> immediate extra snapshot
+        {"type":"pause","request":N}            -> acknowledged paused snapshot
+        {"type":"step","request":N}             -> one tick, then step_complete
+        {"type":"resume","request":N}           -> acknowledged normal simulation
 
 Only loopback endpoints are permitted.
 """
@@ -23,6 +26,8 @@ import json
 import queue
 import socket
 import threading
+import time
+from collections import deque
 from typing import Any, Optional
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -54,6 +59,9 @@ class SSF2Bridge:
         self._latest: Optional[dict[str, Any]] = None
         self._latest_lock = threading.Lock()
         self._events: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        self._deferred_events: deque[dict[str, Any]] = deque()
+        self._request_lock = threading.Lock()
+        self._next_request = 1
         self.hello: Optional[dict[str, Any]] = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -180,12 +188,53 @@ class SSF2Bridge:
                 return state
 
     def drain_events(self) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
+        out = list(self._deferred_events)
+        self._deferred_events.clear()
         while True:
             try:
                 out.append(self._events.get_nowait())
             except queue.Empty:
                 return out
+
+    def wait_reply(
+        self,
+        request: int,
+        expected_type: str,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        """Wait for the reply matching a lockstep command request id.
+
+        Unrelated events are retained for later consumers; an error response
+        for this request and a transport disconnect fail immediately.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            for event in list(self._deferred_events):
+                if event.get("type") == "disconnected":
+                    self._deferred_events.remove(event)
+                    raise BridgeError("bridge disconnected while waiting for reply")
+                if event.get("request") != request:
+                    continue
+                self._deferred_events.remove(event)
+                if event.get("type") == "error":
+                    raise BridgeError(event.get("message", "game rejected command"))
+                if event.get("type") == expected_type:
+                    return event
+                raise BridgeError(
+                    f"expected {expected_type!r} for request {request}, "
+                    f"got {event.get('type')!r}"
+                )
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError(
+                    f"timed out waiting for {expected_type!r} reply to request {request}"
+                )
+            try:
+                event = self._events.get(timeout=min(remaining, 0.25))
+            except queue.Empty:
+                continue
+            self._deferred_events.append(event)
 
     # -- outbound ------------------------------------------------------------
 
@@ -195,6 +244,13 @@ class SSF2Bridge:
         data = (json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8")
         with self._send_lock:
             self._sock.sendall(data)
+
+    def _send_request(self, command: str) -> int:
+        with self._request_lock:
+            request = self._next_request
+            self._next_request += 1
+        self._send({"type": command, "request": request})
+        return request
 
     def send_input(self, player: int, bits: int) -> None:
         """Queue one frame of held input for a CPU-controlled player slot."""
@@ -218,3 +274,15 @@ class SSF2Bridge:
         if config is not None:
             msg["config"] = config
         self._send(msg)
+
+    def pause(self) -> int:
+        """Request a lockstep pause; use ``wait_reply(request, "ack")``."""
+        return self._send_request("pause")
+
+    def step_frame(self) -> int:
+        """Request one lockstep frame; use ``wait_reply(request, "step_complete")``."""
+        return self._send_request("step")
+
+    def resume(self) -> int:
+        """Leave lockstep mode; use ``wait_reply(request, "ack")``."""
+        return self._send_request("resume")

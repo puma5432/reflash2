@@ -42,7 +42,10 @@ package com.mcleodgaming.ssf2.modapi
     *   client -> game: {"type":"input","player":2,"bits":1234}
     *   client -> game: {"type":"takeover","player":1}   (convert slot to CPU + control it)
     *   client -> game: {"type":"ping"}  -> {"type":"pong"}
-    *   client -> game: {"type":"state"} -> immediate extra snapshot
+   *   client -> game: {"type":"state"} -> immediate extra snapshot
+   *   client -> game: {"type":"pause","request":N} -> acknowledged paused snapshot
+   *   client -> game: {"type":"step","request":N} -> one tick, then paused step_complete
+   *   client -> game: {"type":"resume","request":N} -> acknowledged normal simulation
     */
    public class ModAPI
    {
@@ -68,6 +71,16 @@ package com.mcleodgaming.ssf2.modapi
 
       private static var _rlStateCount:int = 0;
 
+      // Lockstep is opt-in for an external client. While enabled, pause and
+      // step commands use StageData's real pause state; no controller START
+      // input is synthesized. A pending step is completed in rlOnTick(),
+      // which re-pauses before the post-step snapshot is built.
+      private static var _rlLockstep:Boolean = false;
+
+      private static var _rlPauseAfterTick:Boolean = false;
+
+      private static var _rlStepRequest:int = -1;
+
       public function ModAPI()
       {
          super();
@@ -86,6 +99,9 @@ package com.mcleodgaming.ssf2.modapi
       public static function deinit() : void
       {
          trace("[ENGINE ModAPI] deinit() called");
+         _rlLockstep = false;
+         _rlPauseAfterTick = false;
+         _rlStepRequest = -1;
          rlDetach();
          _api = null;
          _isInitialized = false;
@@ -706,6 +722,13 @@ package com.mcleodgaming.ssf2.modapi
       private static function rlOnClientClose(param1:Event) : void
       {
          trace("[ModAPI RL] External agent disconnected.");
+         if(isReady() && _rlLockstep && _api.Paused)
+         {
+            _api.Paused = false;
+         }
+         _rlLockstep = false;
+         _rlPauseAfterTick = false;
+         _rlStepRequest = -1;
          _rlClient = null;
       }
 
@@ -799,6 +822,67 @@ package com.mcleodgaming.ssf2.modapi
          {
             rlRestartMatch(_loc2_.config is Object ? _loc2_.config : null);
          }
+         else if(_loc3_ == "pause")
+         {
+            rlPause(int(_loc2_.request));
+         }
+         else if(_loc3_ == "step")
+         {
+            rlStep(int(_loc2_.request));
+         }
+         else if(_loc3_ == "resume")
+         {
+            rlResume(int(_loc2_.request));
+         }
+      }
+
+      /** Pause the simulation and return an acknowledged paused snapshot. */
+      private static function rlPause(param1:int) : void
+      {
+         if(!isReady())
+         {
+            rlSend({"type":"error","request":param1,"command":"pause","message":"game is not ready"});
+            return;
+         }
+         _rlLockstep = true;
+         _rlPauseAfterTick = false;
+         _rlStepRequest = -1;
+         if(!_api.Paused)
+         {
+            _api.Paused = true;
+         }
+         rlSend({"type":"ack","request":param1,"command":"pause","state":rlBuildState()});
+      }
+
+      /** Permit exactly one game tick; rlOnTick() re-pauses and completes it. */
+      private static function rlStep(param1:int) : void
+      {
+         if(!isReady() || !_rlLockstep || !_api.Paused || _rlPauseAfterTick)
+         {
+            rlSend({"type":"error","request":param1,"command":"step","message":"step requires an idle lockstep pause"});
+            return;
+         }
+         _rlStepRequest = param1;
+         _rlPauseAfterTick = true;
+         _api.Paused = false;
+      }
+
+      /** Leave lockstep mode and resume normal simulation. */
+      private static function rlResume(param1:int) : void
+      {
+         if(!isReady())
+         {
+            rlSend({"type":"error","request":param1,"command":"resume","message":"game is not ready"});
+            return;
+         }
+         _rlPauseAfterTick = false;
+         _rlStepRequest = -1;
+         _rlLockstep = false;
+         if(_api.Paused)
+         {
+            _api.Paused = false;
+         }
+         rlSend({"type":"ack","request":param1,"command":"resume","state":rlBuildState()});
       }
 
       /**
@@ -811,6 +895,17 @@ package com.mcleodgaming.ssf2.modapi
             return;
          }
          _rlStateCount++;
+         if(_rlPauseAfterTick)
+         {
+            var _loc2_:int = _rlStepRequest;
+            _rlPauseAfterTick = false;
+            _rlStepRequest = -1;
+            _api.Paused = true;
+            var _loc3_:Object = rlBuildState();
+            rlSend(_loc3_);
+            rlSend({"type":"step_complete","request":_loc2_,"state":_loc3_});
+            return;
+         }
          rlSend(rlBuildState());
       }
 

@@ -8,140 +8,140 @@ package com.mcleodgaming.ssf2.engine
    import com.mcleodgaming.ssf2.util.*;
    import flash.display.MovieClip;
    import flash.geom.*;
-   
+
    public class AI
    {
-      
+
       private var ROOT:MovieClip;
-      
+
       private var STAGE:MovieClip;
-      
+
       private var STAGEPARENT:MovieClip;
-      
+
       private var STAGEDATA:StageData;
-      
+
       private var m_level:int;
-      
+
       private var m_playerClassInstance:Character;
-      
+
       private var m_player_id:int;
-      
+
       private var m_action:int;
-      
+
       private var m_actionsList:Array;
-      
+
       private var m_forceAction:int;
-      
+
       private var m_keys:ControlsObject;
-      
+
       private var m_keys_hist:ControlsObject;
-      
+
       private var m_target:Target;
-      
+
       private var m_targetTemp:Target;
-      
+
       private var m_shortestPath:Vector.<Beacon>;
-      
+
       private var m_running:Boolean;
-      
+
       private var m_fallthrough:Boolean;
-      
+
       private var m_fallthroughTimer:FrameTimer;
-      
+
       private var m_shieldDodge:Boolean;
-      
+
       private var m_shieldProjectile:Boolean;
-      
+
       private var m_grabTimer:FrameTimer;
-      
+
       private var m_grabHitTimer:FrameTimer;
-      
+
       private var m_shieldTimer:FrameTimer;
-      
+
       private var m_shieldHoldTimer:FrameTimer;
-      
+
       private var m_dodgeTimer:FrameTimer;
-      
+
       private var m_attackTimer:FrameTimer;
-      
+
       private var m_franticEvadeTimer:FrameTimer;
-      
+
       private var m_evadeTimer:FrameTimer;
-      
+
       private var m_evadeOverrideTimer:FrameTimer;
-      
+
       private var m_jumpTimer:FrameTimer;
-      
+
       private var m_idleTimer:FrameTimer;
-      
+
       private var m_runTimer:FrameTimer;
-      
+
       private var m_beaconTimer:FrameTimer;
-      
+
       private var m_targetTimer:FrameTimer;
-      
+
       private var m_hangTimer:FrameTimer;
-      
+
       private var m_itemTossTimer:FrameTimer;
-      
+
       private var m_itemPickupTimer:FrameTimer;
-      
+
       private var m_itemGiveUpTimer:FrameTimer;
-      
+
       private var m_fsSpecialTimer:FrameTimer;
-      
+
       private var m_projectileTimer:FrameTimer;
-      
+
       private var m_enemyTimer:FrameTimer;
-      
+
       private var m_itemTimer:FrameTimer;
-      
+
       private var m_confusionTimer:FrameTimer;
-      
+
       private var m_idleFixTimer:FrameTimer;
-      
+
       private var m_boredTimer:FrameTimer;
-      
+
       private var m_boredActionTimer:FrameTimer;
-      
+
       private var m_projectileWarningTimer:FrameTimer;
-      
+
       private var m_hoverTimer:FrameTimer;
-      
+
       private var m_tauntTrigger:Boolean;
-      
+
       private var m_itemPickup:Boolean;
-      
+
       private var m_evadeRight:Boolean;
-      
+
       private var m_currentAttackQueue:Vector.<String>;
-      
+
       private var m_currentAttackQueueTimer:FrameTimer;
-      
+
       private var m_initatedAttack:Boolean;
-      
+
       private var m_currentAttack:AttackObject;
-      
+
       private var m_currentAttackIsProjectile:Boolean;
-      
+
       private var m_currentAttackCombos:int;
-      
+
       private var m_currentAttackChargetime:int;
-      
+
       private var m_currentAttackUseCharge:Boolean;
-      
+
       private var m_disabledAttackList:Vector.<AttackObject>;
-      
+
       private var m_recovering:Boolean;
-      
+
       private var m_finalRecovery:Boolean;
-      
+
       private var m_horizontalRecoveryAttackList:Vector.<AttackObject>;
-      
+
       private var m_recoveryAttackList:Vector.<AttackObject>;
-      
+
       private var m_controlOverrides:Vector.<int>;
-      
+
       public function AI(param1:int, param2:Character, param3:StageData)
       {
          super();
@@ -217,67 +217,67 @@ package com.mcleodgaming.ssf2.engine
          this.m_currentAttackQueueTimer = new FrameTimer(30);
          this.setLevel(param1);
       }
-      
+
       public function get ControlOverrides() : Vector.<int>
       {
          return this.m_controlOverrides;
       }
-      
+
       public function get Recovering() : Boolean
       {
          return this.m_recovering;
       }
-      
+
       public function get CurrentTarget() : Target
       {
          return this.m_target;
       }
-      
+
       public function get Running() : Boolean
       {
          return this.m_running;
       }
-      
+
       public function get FallThrough() : Boolean
       {
          return this.m_fallthrough;
       }
-      
+
       public function get ActionText() : String
       {
          return this.m_actionsList[this.m_action];
       }
-      
+
       public function set ActionText(param1:String) : void
       {
          this.m_forceAction = this.m_actionsList.indexOf(param1) >= 0 ? int(this.m_actionsList.indexOf(param1)) : int(CPUState.NULL);
       }
-      
+
       public function get Action() : int
       {
          return this.m_action;
       }
-      
+
       public function get ForcedAction() : int
       {
          return this.m_forceAction;
       }
-      
+
       public function set ForcedAction(param1:int) : void
       {
          this.m_forceAction = param1;
       }
-      
+
       public function get ControlsObj() : ControlsObject
       {
          return this.m_keys;
       }
-      
+
       public function getLevel() : int
       {
          return this.m_level;
       }
-      
+
       public function setLevel(param1:int) : void
       {
          if(param1 < 0)
@@ -291,7 +291,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_level = param1;
          this.adjustLevelTimers();
       }
-      
+
       private function adjustLevelTimers() : void
       {
          if(this.m_level === 0)
@@ -333,7 +333,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_projectileWarningTimer.finish();
          this.m_confusionTimer.finish();
       }
-      
+
       private function timeByLevel(param1:int, param2:int, param3:Boolean = false) : int
       {
          if(param3)
@@ -342,24 +342,24 @@ package com.mcleodgaming.ssf2.engine
          }
          return (1 - this.m_level / 9) * (param2 - param1) + param1;
       }
-      
+
       private function execIfSmartEnough(param1:Number = 1, param2:Boolean = false) : Boolean
       {
          return param2 ? Utils.LastRandom > (1 - this.m_level / 10) * param1 : Utils.random() > (1 - this.m_level / 10) * param1;
       }
-      
+
       private function execIfDumbEnough(param1:Number = 1, param2:Boolean = false) : Boolean
       {
          return param2 ? Utils.LastRandom > this.m_level / 10 * param1 : Utils.random() > this.m_level / 10 * param1;
       }
-      
+
       public function beginConfusion(param1:int) : void
       {
          this.m_confusionTimer.reset();
          this.m_confusionTimer.MaxTime = param1;
          this.resetControlOverrides();
       }
-      
+
       public function refreshRecoveryAttackList() : void
       {
          var _loc2_:int = 0;
@@ -385,7 +385,7 @@ package com.mcleodgaming.ssf2.engine
             _loc2_++;
          }
       }
-      
+
       public function refreshDisabledAttackList() : void
       {
          var _loc2_:int = 0;
@@ -400,7 +400,7 @@ package com.mcleodgaming.ssf2.engine
             _loc2_++;
          }
       }
-      
+
       public function getDisabledAttack(param1:String) : Boolean
       {
          var _loc2_:int = 0;
@@ -415,12 +415,12 @@ package com.mcleodgaming.ssf2.engine
          }
          return false;
       }
-      
+
       public function triggerTaunt() : void
       {
          this.m_tauntTrigger = true;
       }
-      
+
       private function showCurrentPath() : void
       {
          var _loc1_:String = null;
@@ -438,7 +438,7 @@ package com.mcleodgaming.ssf2.engine
             trace(_loc1_);
          }
       }
-      
+
       public function importControlOverrides(param1:Array) : void
       {
          var _loc2_:int = 0;
@@ -448,12 +448,12 @@ package com.mcleodgaming.ssf2.engine
             _loc2_++;
          }
       }
-      
+
       public function resetControlOverrides() : void
       {
          this.m_controlOverrides.splice(0,this.m_controlOverrides.length);
       }
-      
+
       public function createActionsList() : Array
       {
          var _loc1_:Array = new Array();
@@ -473,7 +473,7 @@ package com.mcleodgaming.ssf2.engine
          _loc1_[13] = "force do nothing";
          return _loc1_;
       }
-      
+
       public function getAction() : void
       {
          this.m_initatedAttack = false;
@@ -636,7 +636,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkControlOverrides() : Boolean
       {
          if(this.m_controlOverrides.length > 0)
@@ -660,7 +660,7 @@ package com.mcleodgaming.ssf2.engine
          }
          return false;
       }
-      
+
       private function checkEvadeOverride() : void
       {
          if(this.m_forceAction < 0 && !this.m_recovering && !this.m_finalRecovery && this.m_action != CPUState.EVADE && (Boolean(this.m_playerClassInstance.Disabled) || Boolean(this.m_playerClassInstance.inState(CState.TUMBLE_FALL))))
@@ -679,7 +679,7 @@ package com.mcleodgaming.ssf2.engine
             this.evade();
          }
       }
-      
+
       private function checkFranticEvade() : void
       {
          if(this.m_forceAction < 0 && !this.m_recovering && !this.m_finalRecovery && this.m_action != CPUState.INIT_SHIELD && this.m_action != CPUState.SHIELD && Boolean(this.targetUsingDangerousFS()))
@@ -713,7 +713,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkStruggle() : void
       {
          if(!this.m_recovering && this.m_forceAction < 0 && Boolean(this.m_playerClassInstance.IsCaught) && Boolean(this.execIfSmartEnough()))
@@ -722,7 +722,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.BUTTON2 = !this.m_keys_hist.BUTTON2;
          }
       }
-      
+
       private function checkItemToss() : void
       {
          if(this.m_forceAction < 0 && !this.m_recovering && this.m_playerClassInstance.ItemObj != null)
@@ -735,7 +735,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkItemGiveUp() : void
       {
          if(Boolean(this.m_forceAction < 0 && !this.m_recovering && this.m_playerClassInstance.ItemObj == null) && Boolean(this.m_target) && Boolean(this.m_target.ItemSprite))
@@ -749,7 +749,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkWallBlock() : void
       {
          if(this.m_forceAction < 0 && !this.m_playerClassInstance.inState(CState.ATTACKING) && (Boolean(this.m_playerClassInstance.CollisionObj.ground) || !this.m_playerClassInstance.CollisionObj.ground && this.m_playerClassInstance.JumpCount < this.m_playerClassInstance.MaxJump && this.m_playerClassInstance.netYSpeed() >= 0))
@@ -768,7 +768,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkItemPickup() : void
       {
          if(this.m_forceAction < 0 && !this.m_recovering && Boolean(this.m_itemPickup))
@@ -777,7 +777,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.BUTTON2 = true;
          }
       }
-      
+
       private function checkDropThrough() : void
       {
          if(this.m_forceAction < 0 && Boolean(this.m_playerClassInstance.OnPlatform) && this.m_target != null && this.m_target.CurrentTarget != null && this.m_target.BeaconSprite == null && this.m_target.CurrentTarget.Y > this.m_playerClassInstance.Y && this.m_target.YDistance > 10 && Boolean(this.m_playerClassInstance.inFreeState()) && this.m_playerClassInstance.CurrentPlatform != this.m_target.CurrentTarget.CurrentPlatform && this.m_playerClassInstance.CurrentPlatform.noDropThrough != true)
@@ -796,7 +796,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.DOWN = false;
          }
       }
-      
+
       private function checkAllowControl() : void
       {
          if(this.m_forceAction < 0 && Boolean(this.m_playerClassInstance.inState(CState.ATTACKING)) && (Boolean(this.m_playerClassInstance.AttackStateData.AllowControl) || Boolean(this.m_playerClassInstance.AttackStateData.AllowTurn)))
@@ -813,7 +813,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkProjectileControl() : void
       {
          var _loc1_:Projectile = null;
@@ -842,7 +842,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkFinalRecovery() : void
       {
          if(Boolean(this.m_recovering) && Boolean(this.m_finalRecovery) && this.m_playerClassInstance.netYSpeed() >= 0 && (this.m_playerClassInstance.JumpCount >= this.m_playerClassInstance.MaxJump || this.m_playerClassInstance.JumpCount < this.m_playerClassInstance.MaxJump && Boolean(this.m_playerClassInstance.inState(CState.ATTACKING))))
@@ -863,7 +863,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkDangerRecovery() : void
       {
          if(Boolean(this.m_playerClassInstance.CollisionObj.ground) && this.m_playerClassInstance.CurrentPlatform != null && (this.m_playerClassInstance.CurrentPlatform.danger == true || Boolean(this.m_playerClassInstance.inLowerLeftWarningBounds()) || Boolean(this.m_playerClassInstance.inLowerRightWarningBounds())))
@@ -886,7 +886,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkFinalSmash() : void
       {
          var _loc1_:Target = null;
@@ -939,7 +939,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkRevival() : void
       {
          if(Boolean(this.m_playerClassInstance.inState(CState.REVIVAL)) && Boolean(this.opponenentUsingSpecial()))
@@ -962,7 +962,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkIdleness() : void
       {
          if(this.m_forceAction < 0 && !this.m_finalRecovery && this.m_level > 0)
@@ -1004,7 +1004,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkProjectileAvoidance() : void
       {
          var _loc1_:int = 0;
@@ -1098,7 +1098,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkEnemyAvoidance() : void
       {
          var _loc1_:int = 0;
@@ -1156,7 +1156,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkItemAvoidance() : void
       {
          var _loc1_:int = 0;
@@ -1213,7 +1213,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkConfusion() : void
       {
          this.m_confusionTimer.tick();
@@ -1265,7 +1265,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkDI() : void
       {
          if(Boolean(this.m_forceAction < 0 && this.m_playerClassInstance.inState(CState.INJURED) && this.m_playerClassInstance.isHitStunOrParalysis()) && Boolean(this.m_target) && Boolean(this.m_target.CurrentTarget))
@@ -1309,7 +1309,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkTaunt() : void
       {
          var _loc1_:int = 0;
@@ -1342,7 +1342,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_tauntTrigger = false;
          }
       }
-      
+
       private function checkTech() : void
       {
          var _loc1_:Number = NaN;
@@ -1388,7 +1388,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkGetup() : void
       {
          if(this.m_forceAction < 0 && Boolean(this.m_playerClassInstance.inState(CState.CRASH_LAND)) && Boolean(this.execIfSmartEnough()))
@@ -1430,7 +1430,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkShortHop() : void
       {
          if(this.m_forceAction < 0 || this.m_forceAction == CPUState.FORCE_JUMP || this.m_forceAction == CPUState.CHASE)
@@ -1451,7 +1451,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkGliding() : void
       {
          if(this.m_recovering)
@@ -1472,7 +1472,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkAttackQueue() : void
       {
          if(this.m_currentAttackQueue.length > 0 && !this.m_playerClassInstance.inState(CState.ATTACKING))
@@ -1488,7 +1488,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkBarrel() : void
       {
          var _loc1_:Platform = null;
@@ -1498,7 +1498,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.BUTTON2 = !this.m_keys_hist.BUTTON2;
          }
       }
-      
+
       private function checkBored() : void
       {
          var _loc1_:Boolean = false;
@@ -1584,7 +1584,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkHover() : void
       {
          if(this.m_forceAction < 0 && this.m_playerClassInstance.MidAirHover > 0 && !this.m_playerClassInstance.CollisionObj.ground && (Boolean(this.m_playerClassInstance.inState(CState.JUMP_RISING)) || Boolean(this.m_playerClassInstance.inState(CState.JUMP_MIDAIR_RISING)) || Boolean(this.m_playerClassInstance.inState(CState.JUMP_FALLING)) || Boolean(this.m_playerClassInstance.inState(CState.HOVER)) || Boolean(this.m_playerClassInstance.inState(CState.ATTACKING)) && Boolean(this.m_playerClassInstance.AttackHovering)))
@@ -1628,7 +1628,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkFinalActions() : void
       {
          if(this.checkControlOverrides())
@@ -1666,7 +1666,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.DASH = this.m_running;
          this.checkConfusion();
       }
-      
+
       private function runAttackTimer() : void
       {
          var _loc1_:Number = NaN;
@@ -1719,7 +1719,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function runShieldTimer() : void
       {
          this.m_shieldTimer.tick();
@@ -1738,7 +1738,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function runGrabTimer() : void
       {
          this.m_grabTimer.tick();
@@ -1760,7 +1760,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function runBeaconTimer() : void
       {
          this.m_beaconTimer.tick();
@@ -1775,7 +1775,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_beaconTimer.reset();
          }
       }
-      
+
       private function runTargetTimer() : void
       {
          this.m_targetTimer.tick();
@@ -1785,7 +1785,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_targetTimer.reset();
          }
       }
-      
+
       private function runHangTimer() : void
       {
          var _loc1_:int = 0;
@@ -1842,7 +1842,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_hangTimer.reset();
          }
       }
-      
+
       private function idle() : void
       {
          this.resetAllKeys();
@@ -1894,7 +1894,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_idleTimer.reset();
          }
       }
-      
+
       private function chase() : void
       {
          this.m_runTimer.tick();
@@ -2037,7 +2037,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function evade() : void
       {
          this.m_evadeTimer.tick();
@@ -2133,7 +2133,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function shield() : void
       {
          this.resetAllKeys();
@@ -2187,12 +2187,12 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function targetUsingDangerousFS() : Boolean
       {
          return Boolean(this.m_target.PlayerSprite) && Boolean(this.m_target.PlayerSprite.UsingFinalSmash) && this.m_target.PlayerSprite.SpecialType > 3;
       }
-      
+
       private function grab() : void
       {
          var _loc1_:int = 0;
@@ -2234,7 +2234,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function chooseAttack() : void
       {
          var _loc1_:Number = NaN;
@@ -2492,7 +2492,7 @@ package com.mcleodgaming.ssf2.engine
             this.addToAttackQueue(this.m_currentAttack.CPUAttackList);
          }
       }
-      
+
       public function addToAttackQueue(param1:String) : void
       {
          var _loc4_:int = 0;
@@ -2520,7 +2520,7 @@ package com.mcleodgaming.ssf2.engine
          }
          this.m_currentAttackQueueTimer.reset();
       }
-      
+
       private function attackOptions() : void
       {
          if(Boolean(this.m_playerClassInstance.inState(CState.ATTACKING)) && this.m_currentAttack != null)
@@ -2646,7 +2646,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function excess() : void
       {
          this.updateTargetPosition();
@@ -2777,7 +2777,7 @@ package com.mcleodgaming.ssf2.engine
             this.tap_Grab();
          }
       }
-      
+
       private function checkBoundaries() : void
       {
          var _loc1_:AttackObject = null;
@@ -2881,7 +2881,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function checkPause() : void
       {
          var _loc1_:Character = null;
@@ -2905,7 +2905,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function getNearestOpponent() : void
       {
          var _loc1_:Beacon = null;
@@ -2947,7 +2947,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_target.setDistance(new Point(this.m_playerClassInstance.X,this.m_playerClassInstance.Y));
          }
       }
-      
+
       private function findSmashBall() : Target
       {
          var _loc1_:Target = new Target();
@@ -2960,7 +2960,7 @@ package com.mcleodgaming.ssf2.engine
          }
          return null;
       }
-      
+
       private function findItem() : Target
       {
          var _loc2_:int = 0;
@@ -2977,7 +2977,7 @@ package com.mcleodgaming.ssf2.engine
          }
          return null;
       }
-      
+
       private function opponenentUsingSpecial() : Boolean
       {
          var _loc1_:int = 0;
@@ -2991,7 +2991,7 @@ package com.mcleodgaming.ssf2.engine
          }
          return false;
       }
-      
+
       private function findOpponent() : Target
       {
          var _loc1_:Character = null;
@@ -3043,7 +3043,7 @@ package com.mcleodgaming.ssf2.engine
          }
          return _loc4_;
       }
-      
+
       private function checkPotentialBeaconPath() : void
       {
          if(this.m_targetTemp.CurrentTarget != null)
@@ -3079,7 +3079,7 @@ package com.mcleodgaming.ssf2.engine
             }
          }
       }
-      
+
       private function updateTargetPosition() : void
       {
          var _loc1_:Item = this.STAGEDATA.ItemsRef.CurrentSmashBall;
@@ -3092,7 +3092,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_target.setDistance(new Point(this.m_playerClassInstance.X - this.m_target.CurrentTarget.netXSpeed() + this.m_playerClassInstance.netXSpeed(),this.m_playerClassInstance.Y - this.m_target.CurrentTarget.netYSpeed() + this.m_playerClassInstance.netYSpeed()));
          }
       }
-      
+
       public function getAngleOfOpponent() : Number
       {
          var _loc1_:Number = 0;
@@ -3109,12 +3109,12 @@ package com.mcleodgaming.ssf2.engine
          }
          return _loc1_;
       }
-      
+
       private function getDistanceFrom(param1:Number, param2:Number) : Number
       {
          return Math.sqrt(Math.pow(param1 - this.m_playerClassInstance.X,2) + Math.pow(param2 - this.m_playerClassInstance.Y,2));
       }
-      
+
       private function B_attackRight() : void
       {
          this.resetAllKeys();
@@ -3122,7 +3122,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON1 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("b_forward");
       }
-      
+
       private function B_attackLeft() : void
       {
          this.resetAllKeys();
@@ -3130,14 +3130,14 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON1 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("b_forward");
       }
-      
+
       private function B_attack() : void
       {
          this.resetAllKeys();
          this.m_keys.BUTTON1 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("b");
       }
-      
+
       private function B_attackUp() : void
       {
          this.resetAllKeys();
@@ -3145,7 +3145,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON1 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("b_up");
       }
-      
+
       private function B_attackDown() : void
       {
          this.resetAllKeys();
@@ -3153,14 +3153,14 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON1 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("b_down");
       }
-      
+
       private function A_attackAir() : void
       {
          this.resetAllKeys();
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_air");
       }
-      
+
       private function A_attackUpAir() : void
       {
          this.resetAllKeys();
@@ -3168,7 +3168,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_air_up");
       }
-      
+
       private function A_attackDownAir() : void
       {
          this.resetAllKeys();
@@ -3176,7 +3176,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_air_down");
       }
-      
+
       private function A_attackRightAir() : void
       {
          this.resetAllKeys();
@@ -3184,7 +3184,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_air_forward");
       }
-      
+
       private function A_attackLeftAir() : void
       {
          this.resetAllKeys();
@@ -3192,14 +3192,14 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_air_forward");
       }
-      
+
       private function A_attack() : void
       {
          this.resetAllKeys();
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a");
       }
-      
+
       private function A_attackRight() : void
       {
          this.resetAllKeys();
@@ -3215,7 +3215,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_forwardsmash");
          }
       }
-      
+
       private function A_attackLeft() : void
       {
          this.resetAllKeys();
@@ -3231,7 +3231,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_forwardsmash");
          }
       }
-      
+
       private function A_attackDown() : void
       {
          this.resetAllKeys();
@@ -3239,7 +3239,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.DOWN = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_down");
       }
-      
+
       private function A_attackUp() : void
       {
          this.resetAllKeys();
@@ -3248,7 +3248,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_keys.BUTTON2 = true;
          this.m_currentAttack = this.m_playerClassInstance.AttackDataObj.getAttack("a_up");
       }
-      
+
       private function getAttackFunction(param1:String) : Function
       {
          if(param1 == "a")
@@ -3297,22 +3297,22 @@ package com.mcleodgaming.ssf2.engine
          }
          return null;
       }
-      
+
       private function storeKeyHistory() : void
       {
          this.m_keys_hist.controls = this.m_keys.controls;
       }
-      
+
       private function restoreKeyHistory() : void
       {
          this.m_keys.controls = this.m_keys_hist.controls;
       }
-      
+
       private function resetAllKeys() : void
       {
          this.m_keys.controls = 0;
       }
-      
+
       private function jump() : void
       {
          if(this.m_keys_hist.JUMP)
@@ -3324,7 +3324,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.JUMP = true;
          }
       }
-      
+
       private function tap_A() : void
       {
          if(this.m_keys_hist.BUTTON2)
@@ -3336,7 +3336,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.BUTTON2 = true;
          }
       }
-      
+
       private function tap_B() : void
       {
          if(this.m_keys_hist.BUTTON1)
@@ -3348,7 +3348,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.BUTTON1 = true;
          }
       }
-      
+
       private function tap_Grab() : void
       {
          if(this.m_keys_hist.GRAB)
@@ -3360,7 +3360,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.GRAB = true;
          }
       }
-      
+
       private function tap_Shield() : void
       {
          if(this.m_keys_hist.RIGHT)
@@ -3372,7 +3372,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.RIGHT = true;
          }
       }
-      
+
       private function tap_Left() : void
       {
          this.m_keys.RIGHT = false;
@@ -3385,7 +3385,7 @@ package com.mcleodgaming.ssf2.engine
             this.m_keys.LEFT = true;
          }
       }
-      
+
       private function tap_Right() : void
       {
          this.m_keys.LEFT = false;
