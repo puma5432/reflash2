@@ -384,7 +384,7 @@ package com.mcleodgaming.ssf2
          if(Main.AUTHORIZED)
          {
             MenuController.showInitialMenu();
-            ModAPI.rlAutoStartCheck();
+            ModAPI.rlBootstrapBridge();
          }
          else
          {

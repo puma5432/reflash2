@@ -182,6 +182,8 @@ package com.mcleodgaming.ssf2.engine
       // single-frame step does not churn the human pause UI/audio lifecycle.
       private var m_researchPaused:Boolean;
 
+      private var m_researchStepping:Boolean;
+
       private var m_pausedLetGo:Boolean;
 
       private var m_pauseCamHeight:Number;
@@ -684,6 +686,7 @@ package com.mcleodgaming.ssf2.engine
          this.m_zLetGo = true;
          this.m_paused = false;
          this.m_researchPaused = false;
+         this.m_researchStepping = false;
          this.m_paused_id = 0;
          this.m_fsCutscene = null;
          this.m_fsCutins = 0;
@@ -2810,7 +2813,7 @@ package com.mcleodgaming.ssf2.engine
          var _loc5_:Boolean = false;
          var _loc6_:int = 0;
          var _loc7_:int = 0;
-         if(this.m_researchPaused)
+         if(this.m_researchPaused || this.m_researchStepping)
          {
             return;
          }
@@ -3116,7 +3119,7 @@ package com.mcleodgaming.ssf2.engine
          {
             if(this.Paused)
             {
-               if(!this.m_researchPaused)
+               if(!this.m_researchPaused && !this.m_researchStepping)
                {
                   _loc2_ = 0;
                   while(_loc2_ < this.CHARACTERS.length)
@@ -4799,6 +4802,27 @@ package com.mcleodgaming.ssf2.engine
       public function get ResearchPaused() : Boolean
       {
          return this.m_researchPaused;
+      }
+
+      /** Execute exactly one simulation tick for an active research session. */
+      public function stepResearchFrame() : Boolean
+      {
+         if(!this.m_researchPaused || this.m_researchStepping || this.m_wasReset || !this.READY)
+         {
+            return false;
+         }
+         this.m_researchStepping = true;
+         this.m_researchPaused = false;
+         this.m_paused = false;
+         try
+         {
+            this.PERFORMALL();
+         }
+         finally
+         {
+            this.m_researchStepping = false;
+         }
+         return true;
       }
 
       public function set Paused(param1:Boolean) : void

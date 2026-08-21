@@ -25,6 +25,8 @@ package com.mcleodgaming.ssf2.modapi
    import flash.filesystem.FileStream;
    import flash.net.ServerSocket;
    import flash.net.Socket;
+   import flash.utils.ByteArray;
+   import flash.utils.Endian;
 
    /**
     * ModAPI + RL research bridge.
@@ -45,7 +47,11 @@ package com.mcleodgaming.ssf2.modapi
    *   client -> game: {"type":"state"} -> immediate extra snapshot
    *   client -> game: {"type":"pause","request":N} -> acknowledged paused snapshot
    *   client -> game: {"type":"step","request":N} -> one tick, then paused step_complete
+   *   client -> game: {"type":"step_sync","request":N} -> immediately pump one tick
    *   client -> game: {"type":"resume","request":N} -> acknowledged normal simulation
+   *   client -> game: {"type":"restart_match","request":N,"config":{}}
+   *       -> {"type":"restart_accepted","request":N,"generation":G}
+   *       -> {"type":"match_ready","request":N,"generation":G,"state":{...}}
     */
    public class ModAPI
    {
@@ -71,6 +77,10 @@ package com.mcleodgaming.ssf2.modapi
 
       private static var _rlStateCount:int = 0;
 
+      private static var _rlStateTransport:String = "json";
+
+      private static var _rlBinaryBuffer:ByteArray = new ByteArray();
+
       // Lockstep is opt-in for an external client. While enabled, pause and
       // step commands use StageData's silent research pause, never the normal
       // user pause lifecycle. A pending step is completed in rlOnTick(),
@@ -80,6 +90,14 @@ package com.mcleodgaming.ssf2.modapi
       private static var _rlPauseAfterTick:Boolean = false;
 
       private static var _rlStepRequest:int = -1;
+
+      private static var _rlMatchGeneration:int = 0;
+
+      private static var _rlRestartPending:Boolean = false;
+
+      private static var _rlRestartRequest:int = -1;
+
+      private static var _rlRestartConfig:Object = null;
 
       public function ModAPI()
       {
@@ -91,6 +109,7 @@ package com.mcleodgaming.ssf2.modapi
          trace("[ENGINE ModAPI] init() called with api=" + param1);
          _api = param1;
          _isInitialized = true;
+         _rlMatchGeneration++;
          trace("[ENGINE ModAPI] init() - _api assigned, _isInitialized = true");
          trace("SSF2 Mod API Version " + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_REVISION + " initialized.");
          rlAttach();
@@ -600,6 +619,32 @@ package com.mcleodgaming.ssf2.modapi
          return _rlPort;
       }
 
+      /** Start the loopback bridge before a StageData instance exists. */
+      public static function rlBootstrapBridge() : void
+      {
+         if(_rlServer != null)
+         {
+            return;
+         }
+         rlStartServer();
+         if(_rlServer == null && Boolean(Main.Root) && Boolean(Main.Root.stage))
+         {
+            Main.Root.stage.addEventListener(Event.ENTER_FRAME,rlEnsureServerStarted);
+         }
+      }
+
+      private static function rlEnsureServerStarted(param1:Event) : void
+      {
+         if(_rlServer == null)
+         {
+            rlStartServer();
+         }
+         if(_rlServer != null && Boolean(Main.Root) && Boolean(Main.Root.stage))
+         {
+            Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlEnsureServerStarted);
+         }
+      }
+
       /**
        * Attach the RL bridge to the current match: lazily start the TCP server
        * and subscribe to per-frame tick events. Called from init().
@@ -610,17 +655,7 @@ package com.mcleodgaming.ssf2.modapi
        */
       private static function rlAttach() : void
       {
-         if(_rlServer == null)
-         {
-            try
-            {
-               rlStartServer();
-            }
-            catch(e:Error)
-            {
-               trace("[ModAPI RL] Failed to start RL server: " + e.message);
-            }
-         }
+         rlBootstrapBridge();
          if(Boolean(Main.Root) && Boolean(Main.Root.stage))
          {
             // Adding the same listener twice is a no-op in Flash, so no guard needed.
@@ -647,12 +682,26 @@ package com.mcleodgaming.ssf2.modapi
          if(Boolean(Main.Root) && Boolean(Main.Root.stage))
          {
             Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlEnsureAttached);
+            Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlEnsureServerStarted);
          }
          if(!_api.EventManagerObj.hasEvent(SSF2Event.GAME_TICK_END,rlOnTick))
          {
             _api.EventManagerObj.addEventListener(SSF2Event.GAME_TICK_END,rlOnTick);
             _api.EventManagerObj.addEventListener(SSF2Event.GAME_ENDED,rlOnGameEnded);
             trace("[ModAPI RL] Attached to match tick events.");
+         }
+      }
+
+      /** Retry the menu-time server bind until it succeeds. */
+      private static function rlEnsureBootstrap(param1:Event) : void
+      {
+         if(_rlServer == null)
+         {
+            rlStartServer();
+         }
+         if(_rlServer != null && Boolean(Main.Root) && Boolean(Main.Root.stage))
+         {
+            Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlEnsureBootstrap);
          }
       }
 
@@ -703,11 +752,15 @@ package com.mcleodgaming.ssf2.modapi
 
       private static function rlOnConnect(param1:ServerSocketConnectEvent) : void
       {
-         if(_rlClient != null)
+         var _loc2_:Socket = _rlClient;
+         if(_loc2_ != null)
          {
+            _loc2_.removeEventListener(ProgressEvent.SOCKET_DATA,rlOnData);
+            _loc2_.removeEventListener(Event.CLOSE,rlOnClientClose);
+            _loc2_.removeEventListener(IOErrorEvent.IO_ERROR,rlOnClientError);
             try
             {
-               _rlClient.close();
+               _loc2_.close();
             }
             catch(e:Error)
             {
@@ -716,16 +769,52 @@ package com.mcleodgaming.ssf2.modapi
          _rlClient = param1.socket;
          _rlRecvBuffer = "";
          _rlStateCount = 0;
+         _rlStateTransport = "json";
          _rlClient.addEventListener(ProgressEvent.SOCKET_DATA,rlOnData);
          _rlClient.addEventListener(Event.CLOSE,rlOnClientClose);
          _rlClient.addEventListener(IOErrorEvent.IO_ERROR,rlOnClientError);
          trace("[ModAPI RL] External agent connected.");
-         rlSend({"type":"hello","api":getAPIVersion(),"port":_rlPort,"framerate":Main.FRAMERATE});
+         // Poll the socket on ENTER_FRAME: SOCKET_DATA is frame-gated, and
+         // rlOnTick only fires during unpaused game ticks. Without this,
+         // a silently-paused game can't see step commands for ~10-15ms.
+         if(Boolean(Main.Root) && Boolean(Main.Root.stage))
+         {
+            Main.Root.stage.addEventListener(Event.ENTER_FRAME,rlPollSocket);
+         }
+         rlSend({"type":"hello","api":getAPIVersion(),"port":_rlPort,"framerate":Main.FRAMERATE,"stateTransports":["json","binary-v3"]});
+      }
+
+      /** Read pending socket data on every render frame (even when paused). */
+      private static function rlPollSocket(param1:Event) : void
+      {
+         if(_rlClient == null || !_rlClient.connected)
+         {
+            rlRemoveSocketPoll();
+            return;
+         }
+         if(_rlClient.bytesAvailable > 0)
+         {
+            rlOnData(null);
+         }
+      }
+
+      /** Detach the ENTER_FRAME socket poll (called on client close/error). */
+      private static function rlRemoveSocketPoll() : void
+      {
+         if(Boolean(Main.Root) && Boolean(Main.Root.stage))
+         {
+            Main.Root.stage.removeEventListener(Event.ENTER_FRAME,rlPollSocket);
+         }
       }
 
       private static function rlOnClientClose(param1:Event) : void
       {
+         if(param1.currentTarget !== _rlClient)
+         {
+            return;
+         }
          trace("[ModAPI RL] External agent disconnected.");
+         rlRemoveSocketPoll();
          if(isReady() && _rlLockstep && _api.ResearchPaused)
          {
             _api.setResearchPaused(false);
@@ -738,7 +827,12 @@ package com.mcleodgaming.ssf2.modapi
 
       private static function rlOnClientError(param1:Event) : void
       {
+         if(param1.currentTarget !== _rlClient)
+         {
+            return;
+         }
          trace("[ModAPI RL] Client socket error: " + param1.toString());
+         rlRemoveSocketPoll();
          if(isReady() && _rlLockstep && _api.ResearchPaused)
          {
             _api.setResearchPaused(false);
@@ -751,24 +845,109 @@ package com.mcleodgaming.ssf2.modapi
 
       private static function rlSend(param1:Object) : void
       {
-         if(_rlClient == null || !_rlClient.connected)
+         var _loc2_:Socket = _rlClient;
+         if(_loc2_ == null || !_loc2_.connected)
          {
             return;
          }
          try
          {
-            _rlClient.writeUTFBytes(JSON.stringify(param1) + "\n");
-            _rlClient.flush();
+            _loc2_.writeUTFBytes(JSON.stringify(param1) + "\n");
+            _loc2_.flush();
          }
          catch(e:Error)
          {
-            _rlClient = null;
+            if(_rlClient === _loc2_)
+            {
+               _rlClient = null;
+            }
+         }
+      }
+
+      /** Write one fixed-width schema-3 state without allocating JSON objects. */
+      private static function rlSendBinaryState(param1:int, param2:int) : void
+      {
+         var _loc3_:Socket = _rlClient;
+         if(_loc3_ == null || !_loc3_.connected || !isReady())
+         {
+            return;
+         }
+         var _loc4_:ByteArray = _rlBinaryBuffer;
+         _loc4_.clear();
+         _loc4_.endian = Endian.BIG_ENDIAN;
+         _loc4_.writeUnsignedInt(0x524C4233);
+         _loc4_.writeByte(param1);
+         _loc4_.writeByte(3);
+         _loc4_.writeShort(0);
+         _loc4_.writeUnsignedInt(0);
+         _loc4_.writeInt(param2);
+         _loc4_.writeInt(_rlMatchGeneration);
+         _loc4_.writeInt(_api.ElapsedFrames);
+         _loc4_.writeByte(_api.Paused ? 1 : 0);
+         _loc4_.writeByte(_api.GameEnded ? 1 : 0);
+         var _loc5_:* = _api.Characters;
+         var _loc6_:int = 0;
+         var _loc7_:int = 0;
+         while(_loc7_ < _loc5_.length)
+         {
+            if(_loc5_[_loc7_])
+            {
+               _loc6_++;
+            }
+            _loc7_++;
+         }
+         _loc4_.writeByte(_loc6_);
+         _loc4_.writeByte(0);
+         _loc7_ = 0;
+         while(_loc7_ < _loc5_.length)
+         {
+            var _loc8_:Character = _loc5_[_loc7_];
+            if(_loc8_)
+            {
+               var _loc9_:String = _loc8_.getCurrentAttackFrame();
+               var _loc10_:int = 0;
+               _loc10_ |= _loc8_.Shielding ? 1 : 0;
+               _loc10_ |= _loc8_.isHitStunOrParalysis() ? 2 : 0;
+               _loc10_ |= _loc9_ != null ? 4 : 0;
+               _loc10_ |= _loc8_.Hanging ? 8 : 0;
+               _loc10_ |= _loc8_.Dead ? 16 : 0;
+               _loc4_.writeInt(_loc8_.ID);
+               _loc4_.writeFloat(_loc8_.X);
+               _loc4_.writeFloat(_loc8_.Y);
+               _loc4_.writeFloat(_loc8_.netXSpeed());
+               _loc4_.writeFloat(_loc8_.netYSpeed());
+               _loc4_.writeByte(_loc8_.FacingRight ? 1 : 0);
+               _loc4_.writeFloat(_loc8_.getDamage());
+               _loc4_.writeShort(Boolean(_loc8_.getMatchResults()) ? int(_loc8_.getMatchResults().StockRemaining) : int(_loc8_.getLives()));
+               _loc4_.writeByte(Boolean(_loc8_.CollisionObj) && Boolean(_loc8_.CollisionObj.ground) ? 1 : 0);
+               _loc4_.writeShort(_loc8_.JumpCount);
+               _loc4_.writeFloat(_loc8_.ShieldPower);
+               _loc4_.writeShort(_loc10_);
+               _loc4_.writeFloat(_loc9_ != null ? _loc8_.getExecTime() : 0);
+            }
+            _loc7_++;
+         }
+         var _loc11_:uint = _loc4_.length - 12;
+         _loc4_.position = 8;
+         _loc4_.writeUnsignedInt(_loc11_);
+         _loc4_.position = 0;
+         try
+         {
+            _loc3_.writeBytes(_loc4_);
+            _loc3_.flush();
+         }
+         catch(e:Error)
+         {
+            if(_rlClient === _loc3_)
+            {
+               _rlClient = null;
+            }
          }
       }
 
       private static function rlOnData(param1:ProgressEvent) : void
       {
-         if(_rlClient == null)
+         if(_rlClient == null || (param1 != null && param1.currentTarget !== _rlClient))
          {
             return;
          }
@@ -826,12 +1005,32 @@ package com.mcleodgaming.ssf2.modapi
          {
             if(isReady())
             {
-               rlSend(rlBuildState());
+               rlSend(rlBuildMinimalState());
+            }
+         }
+         else if(_loc3_ == "state_full")
+         {
+            if(isReady())
+            {
+               rlSend({"type":"full_state","request":int(_loc2_.request),"state":rlBuildFullState()});
+            }
+         }
+         else if(_loc3_ == "configure_transport")
+         {
+            var _loc4_:String = String(_loc2_.transport);
+            if(_loc4_ != "json" && _loc4_ != "binary-v3")
+            {
+               rlSend({"type":"error","request":int(_loc2_.request),"command":"configure_transport","message":"unsupported state transport"});
+            }
+            else
+            {
+               rlSend({"type":"ack","request":int(_loc2_.request),"command":"configure_transport","transport":_loc4_});
+               _rlStateTransport = _loc4_;
             }
          }
          else if(_loc3_ == "restart_match")
          {
-            rlRestartMatch(_loc2_.config is Object ? _loc2_.config : null);
+            rlRestartMatch(_loc2_.config is Object ? _loc2_.config : null,int(_loc2_.request));
          }
          else if(_loc3_ == "pause")
          {
@@ -840,6 +1039,10 @@ package com.mcleodgaming.ssf2.modapi
          else if(_loc3_ == "step")
          {
             rlStep(int(_loc2_.request));
+         }
+         else if(_loc3_ == "step_sync")
+         {
+            rlStepSync(int(_loc2_.request));
          }
          else if(_loc3_ == "resume")
          {
@@ -867,7 +1070,7 @@ package com.mcleodgaming.ssf2.modapi
          {
             _api.setResearchPaused(true);
          }
-         rlSend({"type":"ack","request":param1,"command":"pause","state":rlBuildState()});
+         rlSend({"type":"ack","request":param1,"command":"pause","state":rlBuildMinimalState()});
       }
 
       /** Permit exactly one game tick; rlOnTick() re-pauses and completes it. */
@@ -881,6 +1084,33 @@ package com.mcleodgaming.ssf2.modapi
          _rlStepRequest = param1;
          _rlPauseAfterTick = true;
          _api.setResearchPaused(false);
+      }
+
+      /** Pump one simulation frame immediately instead of waiting for render. */
+      private static function rlStepSync(param1:int) : void
+      {
+         if(!isReady() || !_rlLockstep || !_api.ResearchPaused || _rlPauseAfterTick)
+         {
+            rlSend({"type":"error","request":param1,"command":"step_sync","message":"step requires an idle lockstep pause"});
+            return;
+         }
+         _rlStepRequest = param1;
+         _rlPauseAfterTick = true;
+         if(!_api.stepResearchFrame())
+         {
+            _rlPauseAfterTick = false;
+            _rlStepRequest = -1;
+            _api.setResearchPaused(true);
+            rlSend({"type":"error","request":param1,"command":"step_sync","message":"research frame could not run"});
+            return;
+         }
+         if(_rlPauseAfterTick)
+         {
+            _rlPauseAfterTick = false;
+            _rlStepRequest = -1;
+            _api.setResearchPaused(true);
+            rlSend({"type":"error","request":param1,"command":"step_sync","message":"research frame completed without a tick event"});
+         }
       }
 
       /** Leave lockstep mode and resume normal simulation. */
@@ -898,7 +1128,7 @@ package com.mcleodgaming.ssf2.modapi
          {
             _api.setResearchPaused(false);
          }
-         rlSend({"type":"ack","request":param1,"command":"resume","state":rlBuildState()});
+         rlSend({"type":"ack","request":param1,"command":"resume","state":rlBuildMinimalState()});
       }
 
       /**
@@ -910,6 +1140,13 @@ package com.mcleodgaming.ssf2.modapi
          {
             return;
          }
+         // Poll the socket directly: AIR's ProgressEvent.SOCKET_DATA is
+         // frame-gated and adds ~13ms per round-trip. Reading here lets us
+         // process commands immediately on the sim tick.
+         if(_rlClient.bytesAvailable > 0)
+         {
+            rlOnData(null);
+         }
          _rlStateCount++;
          if(_rlPauseAfterTick)
          {
@@ -917,12 +1154,125 @@ package com.mcleodgaming.ssf2.modapi
             _rlPauseAfterTick = false;
             _rlStepRequest = -1;
             _api.setResearchPaused(true);
-            var _loc3_:Object = rlBuildState();
-            rlSend(_loc3_);
-            rlSend({"type":"step_complete","request":_loc2_,"state":_loc3_});
+            if(_rlStateTransport == "binary-v3")
+            {
+               rlSendBinaryState(2,_loc2_);
+            }
+            else
+            {
+               var _loc3_:Object = rlBuildMinimalState();
+               rlSend({"type":"step_complete","request":_loc2_,"state":_loc3_});
+            }
             return;
          }
-         rlSend(rlBuildState());
+         var _loc4_:Object = null;
+         if(_rlStateTransport == "binary-v3")
+         {
+            rlSendBinaryState(1,-1);
+         }
+         else
+         {
+            _loc4_ = rlBuildMinimalState();
+            rlSend(_loc4_);
+         }
+         if(_rlRestartPending)
+         {
+            if(_loc4_ == null)
+            {
+               _loc4_ = rlBuildMinimalState();
+            }
+            rlSend({"type":"match_ready","request":_rlRestartRequest,"generation":_rlMatchGeneration,"config":_rlRestartConfig,"metadata":rlBuildMatchMetadata(),"state":_loc4_});
+            _rlRestartPending = false;
+            _rlRestartRequest = -1;
+            _rlRestartConfig = null;
+         }
+      }
+
+      /** Build only fields consumed by policies, rewards, and termination. */
+      private static function rlBuildMinimalState() : Object
+      {
+         var _loc1_:Array = [];
+         var _loc2_:* = _api.Characters;
+         var _loc3_:int = 0;
+         while(_loc3_ < _loc2_.length)
+         {
+            var _loc4_:Character = _loc2_[_loc3_];
+            if(_loc4_)
+            {
+               var _loc5_:String = _loc4_.getCurrentAttackFrame();
+               _loc1_.push({
+                  "id":_loc4_.ID,
+                  "name":_loc4_.DisplayName,
+                  "x":_loc4_.X,
+                  "y":_loc4_.Y,
+                  "nxs":_loc4_.netXSpeed(),
+                  "nys":_loc4_.netYSpeed(),
+                  "facing":_loc4_.FacingRight ? 1 : 0,
+                  "damage":_loc4_.getDamage(),
+                  "stocks":Boolean(_loc4_.getMatchResults()) ? int(_loc4_.getMatchResults().StockRemaining) : int(_loc4_.getLives()),
+                  "ground":Boolean(_loc4_.CollisionObj) && Boolean(_loc4_.CollisionObj.ground) ? 1 : 0,
+                  "jumpCount":_loc4_.JumpCount,
+                  "shieldPower":_loc4_.ShieldPower,
+                  "shielding":_loc4_.Shielding ? 1 : 0,
+                  "hitstun":_loc4_.isHitStunOrParalysis() ? 1 : 0,
+                  "atkFrame":_loc5_ != null ? 1 : 0,
+                  "atkExec":_loc5_ != null ? _loc4_.getExecTime() : 0,
+                  "hanging":_loc4_.Hanging ? 1 : 0,
+                  "dead":_loc4_.Dead ? 1 : 0
+               });
+            }
+            _loc3_++;
+         }
+         return {
+            "type":"state",
+            "schema":3,
+            "frame":_api.ElapsedFrames,
+            "paused":_api.Paused ? 1 : 0,
+            "ended":_api.GameEnded ? 1 : 0,
+            "chars":_loc1_
+         };
+      }
+
+      /** Build match-static identity and collision geometry once per reset. */
+      private static function rlBuildMatchMetadata() : Object
+      {
+         var _loc1_:Array = [];
+         var _loc2_:* = _api.Characters;
+         var _loc3_:int = 0;
+         while(_loc3_ < _loc2_.length)
+         {
+            var _loc4_:Character = _loc2_[_loc3_];
+            if(_loc4_)
+            {
+               _loc1_.push({"id":_loc4_.ID,"name":_loc4_.DisplayName});
+            }
+            _loc3_++;
+         }
+         var _loc5_:Array = [];
+         var _loc6_:* = _api.Platforms;
+         _loc3_ = 0;
+         while(_loc3_ < _loc6_.length)
+         {
+            var _loc7_:Platform = _loc6_[_loc3_];
+            if(_loc7_)
+            {
+               _loc5_.push({"x":_loc7_.X,"y":_loc7_.Y,"w":_loc7_.Width,"h":_loc7_.Height,"fall":_loc7_.fallthrough ? 1 : 0,"nodrop":_loc7_.noDropThrough ? 1 : 0});
+            }
+            _loc3_++;
+         }
+         var _loc8_:Array = [];
+         var _loc9_:* = _api.Terrains;
+         _loc3_ = 0;
+         while(_loc3_ < _loc9_.length)
+         {
+            var _loc10_:Platform = _loc9_[_loc3_];
+            if(_loc10_)
+            {
+               _loc8_.push({"x":_loc10_.X,"y":_loc10_.Y,"w":_loc10_.Width,"h":_loc10_.Height,"fall":_loc10_.fallthrough ? 1 : 0});
+            }
+            _loc3_++;
+         }
+         return {"config":_rlRestartConfig,"characters":_loc1_,"platforms":_loc5_,"terrains":_loc8_};
       }
 
       private static function rlOnGameEnded(param1:Event) : void
@@ -942,7 +1292,7 @@ package com.mcleodgaming.ssf2.modapi
        * - projectiles: live projectiles (x,y,xs,ys,name,ownerId,team)
        * - match: timer, schema version
        */
-      private static function rlBuildState() : Object
+      private static function rlBuildFullState() : Object
       {
          var i:int = 0;
          var j:int = 0;
@@ -1160,10 +1510,9 @@ package com.mcleodgaming.ssf2.modapi
       }
 
       /**
-       * Inject one frame of input (ControlsObject bitfield) into the given
-       * player's AI control-override queue. The character must be CPU-controlled
-       * (use rlTakeOver first for human slots). The override is consumed on the
-       * next game frame and fully replaces the CPU's own decision for that frame.
+         * Hold an input mask (ControlsObject bitfield) in the given player's AI
+         * control-override queue until a later command replaces it. The character
+         * must be CPU-controlled (use rlTakeOver first); the latest command wins.
        */
       public static function rlInjectInput(param1:int, param2:int) : void
       {
@@ -1178,10 +1527,10 @@ package com.mcleodgaming.ssf2.modapi
             var _loc5_:Character = _loc3_[_loc4_];
             if(Boolean(_loc5_) && _loc5_.ID == param1 && Boolean(_loc5_.CpuAI))
             {
-               // Latest-wins: drop any stale queued overrides so a slow agent
-               // never replays outdated inputs, then queue exactly one frame.
+               // Latest-wins held input. A practical match cannot exhaust the
+               // sentinel before Python replaces it or match teardown resets AI.
                _loc5_.CpuAI.resetControlOverrides();
-               _loc5_.CpuAI.importControlOverrides([param2,1]);
+               _loc5_.CpuAI.importControlOverrides([param2,int.MAX_VALUE]);
                return;
             }
             _loc4_++;
@@ -1368,15 +1717,31 @@ package com.mcleodgaming.ssf2.modapi
        * RENDER/ENTER_FRAME tick listeners; otherwise the disposed old match
        * keeps ticking and throws null-reference errors.
        */
-      public static function rlRestartMatch(param1:Object) : void
+      public static function rlRestartMatch(param1:Object, param2:int = -1) : void
       {
          try
          {
+            if(_rlRestartPending)
+            {
+               rlSend({"type":"error","request":param2,"command":"restart_match","message":"restart already pending"});
+               return;
+            }
             // If the client supplied no configuration, reuse autostart.json.
             if(!param1)
             {
                param1 = rlReadAutoStartConfig();
             }
+            _rlRestartPending = true;
+            _rlRestartRequest = param2;
+            _rlRestartConfig = param1;
+            _rlPauseAfterTick = false;
+            _rlStepRequest = -1;
+            _rlLockstep = false;
+            if(Boolean(_api) && Boolean(_api.ResearchPaused))
+            {
+               _api.setResearchPaused(false);
+            }
+            rlSend({"type":"ack","request":param2,"command":"restart_match","generation":_rlMatchGeneration + 1});
             if(Boolean(GameController.stageData))
             {
                GameController.stageData.endGame(true);
@@ -1391,6 +1756,10 @@ package com.mcleodgaming.ssf2.modapi
          }
          catch(e:Error)
          {
+            _rlRestartPending = false;
+            _rlRestartRequest = -1;
+            _rlRestartConfig = null;
+            rlSend({"type":"error","request":param2,"command":"restart_match","message":e.message});
             trace("[ModAPI RL] restartMatch failed: " + e.message);
          }
       }

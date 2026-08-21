@@ -42,8 +42,9 @@ def main() -> int:
     try:
         # Wait for the first state snapshot.
         state = bridge.wait_state(timeout=10.0)
+        debug_state = bridge.request_full_state(timeout=10.0)
         print(f"First state @ frame {state['frame']}:")
-        for ch in state["chars"]:
+        for ch in debug_state["chars"]:
             print(
                 f"  P{ch['id']} {ch['name']:<12} pos=({ch['x']:.1f},{ch['y']:.1f}) "
                 f"vel=({ch['xs']:.2f},{ch['ys']:.2f}) dmg={ch['damage']:.0f} "
@@ -61,7 +62,7 @@ def main() -> int:
         print(f"Streamed {frames} frames in ~2s (last frame {last_frame}).")
 
         # Take over player 2 and drive it with a fixed input sequence.
-        p2 = next((c for c in state["chars"] if c["id"] == 2), None)
+        p2 = next((c for c in debug_state["chars"] if c["id"] == 2), None)
         if p2 is None:
             print("No player 2 found; skipping input injection test.")
             return 0
@@ -83,7 +84,8 @@ def main() -> int:
             bridge.send_input(2, 0)
             time.sleep(1 / 30)
 
-        after = bridge.wait_state(timeout=5.0)
+        bridge.wait_state(timeout=5.0)
+        after = bridge.request_full_state(timeout=5.0)
         p2_after = next((c for c in after["chars"] if c["id"] == 2), None)
         if p2_after:
             print(

@@ -5,13 +5,14 @@ opponent char, and opponent-relative features). Action: Discrete over a fixed
 set of named control masks (idle / move / jump / attack / special / shield /
 grab / combos). Reward: damage-delta shaping + KO bonuses (configurable).
 
-reset() sends a `restart_match` command so each episode starts from a fresh
-local VS match (auto-started by the instrumented build).
+reset() sends a request-correlated `restart_match` command so each episode
+starts from a fresh local VS match configured by the caller.
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional, Union
+from time import perf_counter
 
 import numpy as np
 
@@ -64,12 +65,14 @@ class SSF2Env(gym.Env):
         port: int = DEFAULT_PORT,
         agent_player: int = 1,
         max_episode_frames: int = 30 * 120,   # 2 min at 30 FPS
-        step_timeout: float = 2.0,
+        step_timeout: float = 5.0,
         reward_scale: float = 1.0,
         ko_bonus: float = 10.0,
         config: Optional[dict] = None,
         auto_launch: bool = True,
         lockstep: bool = False,
+        lockstep_mode: str = "render",
+        state_transport: str = "json",
         players: Optional[dict[int, Player]] = None,
         stage: Union[str, Stage] = "finaldestination",
         lives: int = 99,
@@ -78,6 +81,12 @@ class SSF2Env(gym.Env):
         self._port = port
         self.auto_launch = auto_launch
         self.lockstep = bool(lockstep)
+        if lockstep_mode not in {"render", "synchronous"}:
+            raise ValueError("lockstep_mode must be 'render' or 'synchronous'")
+        if lockstep_mode == "synchronous" and not self.lockstep:
+            raise ValueError("lockstep_mode='synchronous' requires lockstep=True")
+        self.lockstep_mode = lockstep_mode
+        self.state_transport = state_transport
         self.agent_player = agent_player
         self.max_episode_frames = max_episode_frames
         self.step_timeout = step_timeout
@@ -100,6 +109,7 @@ class SSF2Env(gym.Env):
         self._frames_in_episode = 0
         self._dropped_frames = 0  # frames the loop missed (see run())
         self._lockstep_paused = False
+        self._last_step_seconds = 0.0
 
         # Observation: agent(16) + opponent(16) + relative(4) + match(2)
         self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(OBS_DIM,), dtype=np.float32) # TODO: spaces.box() seems like a good fit. Could experiment with later
@@ -112,7 +122,12 @@ class SSF2Env(gym.Env):
             if self.auto_launch:
                 # Start the game if it isn't running yet; no-op otherwise.
                 ensure_game_running(self._host, self._port)
-            self._bridge = SSF2Bridge(self._host, self._port, timeout=15.0)
+            self._bridge = SSF2Bridge(
+                self._host,
+                self._port,
+                timeout=15.0,
+                state_transport=self.state_transport,
+            )
             self._bridge.connect()
         return self._bridge
 
@@ -139,18 +154,18 @@ class SSF2Env(gym.Env):
         if stage is not None:
             self.stage = stage
 
-        bridge = self._connect()
         # Build the match config from the declarations (unless a raw config
         # was passed to the constructor, which still takes precedence).
         config = self.config or build_match_config(
             self.players, stage=self.stage, lives=self.lives
         )
-        # Make sure the current match is actually running before restarting;
-        # restarting mid-load (e.g. right after auto-launch) crashes the game.
-        bridge.wait_state(timeout=30.0)
-        bridge.restart_match(config)
-        # Wait for a brand-new state stream (frame counter resets to ~0).
-        state = self._wait_for_new_match(bridge)
+        bridge = self._connect()
+        # Drop stale old-match traffic before request-correlating this reset.
+        bridge.clear_pending_messages()
+        request = bridge.restart_match(config)
+        bridge.wait_reply(request, "ack", timeout=30.0)
+        reply = bridge.wait_reply(request, "match_ready", timeout=30.0)
+        state = self._reply_state(reply, "restart")
         # Take over every non-Human slot. For Bot slots this lets the bridge
         # drive them; for CPU slots it is idempotent (already-CPU slots are
         # untouched) but required on slot 1, which the game's match config
@@ -175,6 +190,7 @@ class SSF2Env(gym.Env):
             self._lockstep_paused = False
         self._last_state = state
         self._frames_in_episode = 0
+        self._last_step_seconds = 0.0
         for decl in self.players.values():
             if isinstance(decl, Bot):
                 decl.on_match_start(state)
@@ -195,6 +211,7 @@ class SSF2Env(gym.Env):
         default is 0, so a Bot slot never silently reverts to the in-game
         CPU and "controls == 0" always means Python is driving.
         """
+        started = perf_counter()
         bridge = self._connect()
         prev = self._last_state
         if prev is None:
@@ -220,7 +237,7 @@ class SSF2Env(gym.Env):
             bridge.send_input(pid, mask)
         self._last_masks = masks
         if self.lockstep:
-            request = bridge.step_frame()
+            request = bridge.step_frame_sync() if self.lockstep_mode == "synchronous" else bridge.step_frame()
             reply = bridge.wait_reply(request, "step_complete", timeout=self.step_timeout)
             state = self._reply_state(reply, "step")
             expected_frame = prev["frame"] + 1
@@ -241,6 +258,7 @@ class SSF2Env(gym.Env):
                 self._dropped_frames += gap
         self._last_state = state
         self._frames_in_episode += 1
+        self._last_step_seconds = perf_counter() - started
 
         reward = self._reward(prev, state)
         terminated = bool(state["ended"]) or self._any_ko(state)
@@ -309,6 +327,10 @@ class SSF2Env(gym.Env):
         """One-table summary of who controls every slot (and the stage)."""
         return describe_matchup(self.players, stage=self.stage)
 
+    def request_full_state(self, timeout: float = 5.0) -> dict:
+        """Return a full schema-2 debug snapshot outside the policy hot path."""
+        return self._connect().request_full_state(timeout=timeout)
+
     @staticmethod
     def _validate_players(players: dict[int, Player], agent_player: int) -> None:
         """Check the matchup: the agent slot must exist.
@@ -322,20 +344,6 @@ class SSF2Env(gym.Env):
             raise ValueError(f"agent_player={agent_player} has no player declaration")
 
     # -- helpers -------------------------------------------------------------
-
-    def _wait_for_new_match(self, bridge: SSF2Bridge) -> dict:
-        """After restart_match, the old frame counter is high; wait until we see
-        a low frame number (new match) or a fresh state after a brief delay."""
-        import time
-
-        deadline = time.monotonic() + 20.0
-        first = bridge.wait_state(timeout=10.0)
-        # The restarted match starts its frame counter near 0.
-        while time.monotonic() < deadline:
-            s = bridge.wait_state(timeout=5.0)
-            if s["frame"] < first["frame"] or s["frame"] < 90:
-                return s
-        return bridge.wait_state(timeout=5.0)
 
     def _chars(self, state: dict):
         return pick_chars(state, self.agent_player)
@@ -352,6 +360,10 @@ class SSF2Env(gym.Env):
             "frame": state["frame"],
             "paused": bool(state.get("paused")),
             "lockstep": self.lockstep,
+            "lockstep_mode": self.lockstep_mode,
+            "state_transport": self._bridge.state_transport if self._bridge else self.state_transport,
+            "step_seconds": self._last_step_seconds,
+            "simulation_fps": 1.0 / self._last_step_seconds if self._last_step_seconds > 0 else 0.0,
             "me": me,
             "opp": opp,
         }

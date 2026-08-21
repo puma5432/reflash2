@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "stage": "finaldestination",
   "characters": ["marth", "samus"],
   "lives": 99,

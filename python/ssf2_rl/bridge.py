@@ -6,10 +6,11 @@ Wire protocol (newline-delimited JSON, matches tools/rl/ModAPI_patched.as):
     {"type":"hello","api":...,"port":...,"framerate":...}
     {"type":"state","frame":N,"paused":0|1,"ended":0|1,"chars":[...]}
     {"type":"match_end"}   (ModAPI.deinit - match torn down)
+    {"type":"match_ready","request":N,"generation":G,"state":...}
     {"type":"game_ended"}  (match reached an end condition)
 
     client -> game:
-    {"type":"input","player":P,"bits":M}    one frame of held input
+    {"type":"input","player":P,"bits":M}    hold input until replaced
     {"type":"takeover","player":P}          convert slot P to CPU control
     {"type":"ping"}                          -> {"type":"pong"}
     {"type":"state"}                         -> immediate extra snapshot
@@ -25,6 +26,7 @@ from __future__ import annotations
 import json
 import queue
 import socket
+import struct
 import threading
 import time
 from collections import deque
@@ -32,6 +34,11 @@ from typing import Any, Optional
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DEFAULT_PORT = 4567
+_BINARY_MAGIC = b"RLB3"
+_BINARY_HEADER = struct.Struct(">4sBBHI")
+_BINARY_PREFIX = struct.Struct(">iiiBBBB")
+_BINARY_CHAR = struct.Struct(">iffffBfhBhfHf")
+_MAX_BINARY_PAYLOAD = 1024 * 1024
 
 
 class BridgeError(RuntimeError):
@@ -45,15 +52,25 @@ class SSF2Bridge:
     most recent snapshot, discarding stale ones (the game streams at 30 FPS).
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = DEFAULT_PORT, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = DEFAULT_PORT,
+        timeout: float = 10.0,
+        state_transport: str = "json",
+    ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise BridgeError("research bridge only permits loopback hosts")
         self._host = host
         self._port = port
         self._timeout = timeout
+        if state_transport not in {"json", "binary-v3"}:
+            raise BridgeError(f"unsupported state transport: {state_transport!r}")
+        self.state_transport = state_transport
         self._sock: Optional[socket.socket] = None
         self._reader: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._reader_error: Optional[str] = None
         self._send_lock = threading.Lock()
         self._states: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=64)
         self._latest: Optional[dict[str, Any]] = None
@@ -62,6 +79,9 @@ class SSF2Bridge:
         self._deferred_events: deque[dict[str, Any]] = deque()
         self._request_lock = threading.Lock()
         self._next_request = 1
+        self._char_names: dict[int, str] = {}
+        self.match_generation = 0
+        self.match_metadata: dict[str, Any] = {}
         self.hello: Optional[dict[str, Any]] = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -72,6 +92,7 @@ class SSF2Bridge:
         self._sock = socket.create_connection((self._host, self._port), self._timeout)
         self._sock.settimeout(None)
         self._stop.clear()
+        self._reader_error = None
         # Read the hello handshake BEFORE starting the reader thread,
         # otherwise the thread races us and consumes it.
         hello = self._next_message(timeout=self._timeout)
@@ -81,6 +102,10 @@ class SSF2Bridge:
         self.hello = hello
         self._reader = threading.Thread(target=self._read_loop, daemon=True, name="ssf2-bridge-reader")
         self._reader.start()
+        supported = set(hello.get("stateTransports", ["json"]))
+        if self.state_transport not in supported:
+            self.state_transport = "json"
+        self.set_state_transport(self.state_transport, timeout=self._timeout)
         return hello
 
     def close(self) -> None:
@@ -110,28 +135,120 @@ class SSF2Bridge:
 
     def _read_loop(self) -> None:
         assert self._sock is not None
-        buf = b""
+        sock = self._sock
+        buf = bytearray()
         while not self._stop.is_set():
             try:
-                chunk = self._sock.recv(65536)
+                chunk = sock.recv(65536)
             except OSError:
                 break
             if not chunk:
                 break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
+            buf.extend(chunk)
+            while buf:
+                if buf.startswith(_BINARY_MAGIC):
+                    if len(buf) < _BINARY_HEADER.size:
+                        break
+                    _, kind, schema, _, payload_length = _BINARY_HEADER.unpack_from(buf)
+                    if schema != 3 or payload_length > _MAX_BINARY_PAYLOAD:
+                        self._reader_error = "invalid binary state header"
+                        self._events.put({"type": "protocol_error", "message": self._reader_error})
+                        return
+                    frame_length = _BINARY_HEADER.size + payload_length
+                    if len(buf) < frame_length:
+                        break
+                    payload = bytes(buf[_BINARY_HEADER.size:frame_length])
+                    del buf[:frame_length]
+                    try:
+                        self._dispatch_binary_state(kind, payload)
+                    except (ValueError, struct.error) as exc:
+                        self._reader_error = str(exc)
+                        self._events.put({"type": "protocol_error", "message": self._reader_error})
+                        return
+                    continue
+                newline = buf.find(b"\n")
+                if newline < 0:
+                    break
+                line = bytes(buf[:newline])
+                del buf[:newline + 1]
                 if not line.strip():
                     continue
                 try:
                     msg = json.loads(line.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    continue
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    self._reader_error = str(exc)
+                    self._events.put({"type": "protocol_error", "message": self._reader_error})
+                    return
                 self._dispatch(msg)
+        if not self._stop.is_set() and self._reader_error is None:
+            self._reader_error = "bridge disconnected"
         self._events.put({"type": "disconnected"})
 
+    def _dispatch_binary_state(self, kind: int, payload: bytes) -> None:
+        if len(payload) < _BINARY_PREFIX.size:
+            raise ValueError("truncated binary state prefix")
+        request, generation, frame, paused, ended, char_count, _ = _BINARY_PREFIX.unpack_from(payload)
+        expected = _BINARY_PREFIX.size + char_count * _BINARY_CHAR.size
+        if len(payload) != expected:
+            raise ValueError(f"binary state length {len(payload)} != expected {expected}")
+        chars = []
+        offset = _BINARY_PREFIX.size
+        for _ in range(char_count):
+            (
+                player_id, x, y, nxs, nys, facing, damage, stocks,
+                ground, jump_count, shield_power, flags, atk_exec,
+            ) = _BINARY_CHAR.unpack_from(payload, offset)
+            offset += _BINARY_CHAR.size
+            chars.append({
+                "id": player_id,
+                "name": self._char_names.get(player_id, f"P{player_id}"),
+                "x": x,
+                "y": y,
+                "nxs": nxs,
+                "nys": nys,
+                "facing": facing,
+                "damage": damage,
+                "stocks": stocks,
+                "ground": ground,
+                "jumpCount": jump_count,
+                "shieldPower": shield_power,
+                "shielding": 1 if flags & 1 else 0,
+                "hitstun": 1 if flags & 2 else 0,
+                "atkFrame": 1 if flags & 4 else 0,
+                "atkExec": atk_exec,
+                "hanging": 1 if flags & 8 else 0,
+                "dead": 1 if flags & 16 else 0,
+            })
+        self.match_generation = generation
+        state = {
+            "type": "state",
+            "schema": 3,
+            "frame": frame,
+            "paused": paused,
+            "ended": ended,
+            "chars": chars,
+        }
+        if kind == 1:
+            self._dispatch(state)
+        elif kind == 2:
+            self._dispatch({"type": "step_complete", "request": request, "state": state})
+        else:
+            raise ValueError(f"unknown binary state kind {kind}")
+
     def _dispatch(self, msg: dict[str, Any]) -> None:
+        state = msg.get("state") if isinstance(msg.get("state"), dict) else msg
+        if isinstance(state, dict):
+            for char in state.get("chars", []):
+                if "id" in char and char.get("name"):
+                    self._char_names[int(char["id"])] = str(char["name"])
+        if msg.get("generation") is not None:
+            self.match_generation = int(msg["generation"])
+        if isinstance(msg.get("metadata"), dict):
+            self.match_metadata = msg["metadata"]
         mtype = msg.get("type")
+        if mtype == "match_end":
+            self.match_metadata = {}
+            self._char_names.clear()
         if mtype == "state":
             with self._latest_lock:
                 self._latest = msg
@@ -177,6 +294,8 @@ class SSF2Bridge:
 
         deadline = time.monotonic() + timeout
         while True:
+            if self._reader_error is not None:
+                raise BridgeError(self._reader_error)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise BridgeError("timed out waiting for state")
@@ -196,6 +315,15 @@ class SSF2Bridge:
             except queue.Empty:
                 return out
 
+    def clear_pending_messages(self) -> None:
+        """Discard state/event traffic from a previous match before reset."""
+        while True:
+            try:
+                self._states.get_nowait()
+            except queue.Empty:
+                break
+        self.drain_events()
+
     def wait_reply(
         self,
         request: int,
@@ -213,6 +341,9 @@ class SSF2Bridge:
                 if event.get("type") == "disconnected":
                     self._deferred_events.remove(event)
                     raise BridgeError("bridge disconnected while waiting for reply")
+                if event.get("type") == "protocol_error":
+                    self._deferred_events.remove(event)
+                    raise BridgeError(event.get("message", "bridge protocol error"))
                 if event.get("request") != request:
                     continue
                 self._deferred_events.remove(event)
@@ -253,7 +384,7 @@ class SSF2Bridge:
         return request
 
     def send_input(self, player: int, bits: int) -> None:
-        """Queue one frame of held input for a CPU-controlled player slot."""
+        """Hold an input mask on a CPU-controlled slot until it is replaced."""
         if not isinstance(bits, int) or bits < 0 or bits >> 22:
             raise BridgeError(f"invalid controls mask: {bits!r}")
         self._send({"type": "input", "player": int(player), "bits": bits})
@@ -268,12 +399,40 @@ class SSF2Bridge:
     def request_state(self) -> None:
         self._send({"type": "state"})
 
-    def restart_match(self, config: dict | None = None) -> None:
-        """Tear down the current match and start a fresh one (for env.reset())."""
-        msg: dict = {"type": "restart_match"}
+    def request_full_state(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Request the full debug snapshot; this is not part of the hot path."""
+        request = self._send_request("state_full")
+        reply = self.wait_reply(request, "full_state", timeout=timeout)
+        state = reply.get("state")
+        if not isinstance(state, dict):
+            raise BridgeError("full_state reply did not include a state")
+        return state
+
+    def configure_transport(self, transport: str) -> int:
+        with self._request_lock:
+            request = self._next_request
+            self._next_request += 1
+        self._send({"type": "configure_transport", "request": request, "transport": transport})
+        return request
+
+    def set_state_transport(self, transport: str, timeout: float = 5.0) -> None:
+        """Negotiate a state transport and wait until the game accepts it."""
+        if transport not in {"json", "binary-v3"}:
+            raise BridgeError(f"unsupported state transport: {transport!r}")
+        request = self.configure_transport(transport)
+        self.wait_reply(request, "ack", timeout=timeout)
+        self.state_transport = transport
+
+    def restart_match(self, config: dict | None = None) -> int:
+        """Start a fresh match and return its request id."""
+        with self._request_lock:
+            request = self._next_request
+            self._next_request += 1
+        msg: dict = {"type": "restart_match", "request": request}
         if config is not None:
             msg["config"] = config
         self._send(msg)
+        return request
 
     def pause(self) -> int:
         """Request a lockstep pause; use ``wait_reply(request, "ack")``."""
@@ -282,6 +441,10 @@ class SSF2Bridge:
     def step_frame(self) -> int:
         """Request one lockstep frame; use ``wait_reply(request, "step_complete")``."""
         return self._send_request("step")
+
+    def step_frame_sync(self) -> int:
+        """Immediately pump one lockstep frame without waiting for AIR rendering."""
+        return self._send_request("step_sync")
 
     def resume(self) -> int:
         """Leave lockstep mode; use ``wait_reply(request, "ack")``."""
