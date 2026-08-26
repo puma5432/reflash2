@@ -11,10 +11,11 @@ starts from a fresh local VS match configured by the caller.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, TYPE_CHECKING
 from time import perf_counter
 
 import numpy as np
+import json
 
 try:
     import gymnasium as gym
@@ -43,6 +44,9 @@ from .obs import (
     pick_chars,
     reward_delta,
 )
+
+if TYPE_CHECKING:
+    from .episode import Episode
 
 # Default bridge endpoint
 DEFAULT_HOST = "127.0.0.1"
@@ -385,6 +389,58 @@ class SSF2Env(gym.Env):
         print(f"record_human(): {n} frames -> {len(script)} script entries")
         return script
 
+    def collect_episode(
+        self,
+        players: Optional[dict[int, Player]] = None,
+        stage: Optional[Union[str, Stage]] = None,
+        frames: Optional[int] = None,
+        until_done: bool = True,
+    ) -> "Episode":
+        """Collect a full episode using game-side buffering (fast).
+
+        Buffers per-frame records in the game and bulk-transfers at the end,
+        avoiding per-frame socket round-trips. Much faster than lockstep for
+        large trajectory collection.
+
+        Args:
+            players: slot declarations (uses current if None).
+            stage: stage override (uses current if None).
+            frames: maximum frames to collect (None = until match ends).
+            until_done: stop when the match ends / a stock hits 0.
+
+        Returns:
+            An ``Episode`` containing all collected frames.
+        """
+        from .episode import Episode
+
+        if players is not None or stage is not None:
+            self.reset(players=players, stage=stage)
+
+        bridge = self._connect()
+        config = self.config or build_match_config(
+            self.players, stage=self.stage, lives=self.lives
+        )
+
+        # Start recording
+        req = bridge.start_recording()
+        bridge.wait_reply(req, "ack", timeout=5.0)
+
+        # Run the match — use run() which handles state waiting properly
+        self.run(frames=frames, until_done=until_done)
+
+        # Stop and retrieve
+        req = bridge.stop_recording()
+        bridge.wait_reply(req, "ack", timeout=5.0)
+        req = bridge.get_episode()
+        event = bridge.wait_episode(timeout=30.0)
+
+        print(f"collect_episode(): {len(event['frames'])} frames collected")
+        return Episode(
+            frames=event["frames"],
+            config=config,
+            generation=event.get("generation", 0),
+        )
+
     def close(self) -> None:
         if self._bridge is not None:
             if self.lockstep and self._lockstep_paused:
@@ -404,6 +460,92 @@ class SSF2Env(gym.Env):
     def request_full_state(self, timeout: float = 5.0) -> dict:
         """Return a full schema-2 debug snapshot outside the policy hot path."""
         return self._connect().request_full_state(timeout=timeout)
+
+    def replay_ssfrec(
+        self,
+        path: str,
+        collect: bool = True,
+        timeout: float = 30.0,
+    ) -> "Episode":
+        """Load a .ssfrec replay file and play it back, optionally collecting states.
+
+        The .ssfrec file is a zlib-compressed JSON containing the game's
+        ReplayData export. This method decompresses it, sends it to the game,
+        and starts the match in replay mode.
+
+        Args:
+            path: path to the .ssfrec file.
+            collect: if True, buffer per-frame states during playback and
+                return them as an Episode. If False, just play the replay.
+            timeout: timeout for the load operation.
+
+        Returns:
+            An ``Episode`` containing the collected frames (if collect=True),
+            or an empty Episode (if collect=False).
+        """
+        import zlib
+        from .episode import Episode
+
+        # Read and decompress the .ssfrec file
+        with open(path, "rb") as fh:
+            compressed = fh.read()
+        try:
+            decompressed = zlib.decompress(compressed)
+        except zlib.error as exc:
+            raise BridgeError(f"failed to decompress {path}: {exc}")
+        # ByteArray.writeUTF() writes a 2-byte big-endian length prefix
+        import struct
+        if len(decompressed) < 2:
+            raise BridgeError(f"invalid .ssfrec file: too short")
+        str_len = struct.unpack(">H", decompressed[:2])[0]
+        if len(decompressed) < 2 + str_len:
+            raise BridgeError(f"invalid .ssfrec file: truncated JSON")
+        replay_json = json.loads(decompressed[2:2 + str_len].decode("utf-8"))
+
+        # Start recording if collecting
+        bridge = self._connect()
+        if collect:
+            req = bridge.start_recording()
+            bridge.wait_reply(req, "ack", timeout=5.0)
+
+        # Load the replay
+        req = bridge.load_replay(replay_json)
+        reply = bridge.wait_reply(req, "ack", timeout=timeout)
+        frame_count = reply.get("frames", 0)
+
+        if not collect:
+            return Episode(frames=[], config=replay_json.get("matchSettings", {}))
+
+        # Wait for the replay to play through. The ack fires when the match
+        # STARTS, so we must watch the frame counter until the replay ends
+        # (it auto-ends when elapsed frames exceed the replay's frame count).
+        import time
+        deadline = time.monotonic() + max(30.0, frame_count / 30.0 * 2 + 10.0)
+        while True:
+            state = bridge.latest_state()
+            if state is not None and state.get("frame", 0) >= frame_count:
+                break
+            if state is not None and state.get("ended"):
+                break
+            if time.monotonic() > deadline:
+                raise BridgeError(
+                    f"timed out waiting for replay to finish "
+                    f"(frame {state and state.get('frame')}/{frame_count})"
+                )
+            time.sleep(0.25)
+
+        # Retrieve the buffered episode
+        req = bridge.stop_recording()
+        bridge.wait_reply(req, "ack", timeout=5.0)
+        req = bridge.get_episode()
+        event = bridge.wait_episode(timeout=30.0)
+
+        print(f"replay_ssfrec(): collected {len(event['frames'])} frames from {path}")
+        return Episode(
+            frames=event["frames"],
+            config=replay_json.get("matchSettings", {}),
+            generation=event.get("generation", 0),
+        )
 
     @staticmethod
     def _validate_players(players: dict[int, Player], agent_player: int) -> None:

@@ -35,10 +35,13 @@ from typing import Any, Optional
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DEFAULT_PORT = 4567
 _BINARY_MAGIC = b"RLB3"
+_EPISODE_MAGIC = b"EPI0"
 _BINARY_HEADER = struct.Struct(">4sBBHI")
+_EPISODE_HEADER = struct.Struct(">4siiI")
 _BINARY_PREFIX = struct.Struct(">iiiBBBB")
 _BINARY_CHAR = struct.Struct(">iffffBfhBhfHfi")
 _MAX_BINARY_PAYLOAD = 1024 * 1024
+_MAX_EPISODE_PAYLOAD = 64 * 1024 * 1024  # 64MB compressed
 
 
 class BridgeError(RuntimeError):
@@ -166,6 +169,26 @@ class SSF2Bridge:
                         self._events.put({"type": "protocol_error", "message": self._reader_error})
                         return
                     continue
+                if buf.startswith(_EPISODE_MAGIC):
+                    if len(buf) < _EPISODE_HEADER.size:
+                        break
+                    _, generation, frame_count, payload_length = _EPISODE_HEADER.unpack_from(buf)
+                    if payload_length > _MAX_EPISODE_PAYLOAD:
+                        self._reader_error = "invalid episode header"
+                        self._events.put({"type": "protocol_error", "message": self._reader_error})
+                        return
+                    frame_length = _EPISODE_HEADER.size + payload_length
+                    if len(buf) < frame_length:
+                        break
+                    payload = bytes(buf[_EPISODE_HEADER.size:frame_length])
+                    del buf[:frame_length]
+                    try:
+                        self._dispatch_episode(generation, frame_count, payload)
+                    except (ValueError, struct.error) as exc:
+                        self._reader_error = str(exc)
+                        self._events.put({"type": "protocol_error", "message": self._reader_error})
+                        return
+                    continue
                 newline = buf.find(b"\n")
                 if newline < 0:
                     break
@@ -235,6 +258,53 @@ class SSF2Bridge:
             self._dispatch({"type": "step_complete", "request": request, "state": state})
         else:
             raise ValueError(f"unknown binary state kind {kind}")
+
+    def _dispatch_episode(self, generation: int, frame_count: int, payload: bytes) -> None:
+        """Decode a bulk episode transfer and queue it as an event."""
+        import zlib
+        try:
+            raw = zlib.decompress(payload)
+        except zlib.error as exc:
+            raise ValueError(f"episode decompression failed: {exc}")
+        frames = []
+        offset = 0
+        for _ in range(frame_count):
+            if offset + 7 > len(raw):
+                raise ValueError("truncated episode frame header")
+            frame, paused, ended, char_count = struct.unpack_from(">iBBB", raw, offset)
+            offset += 7
+            chars = []
+            for _ in range(char_count):
+                if offset + _BINARY_CHAR.size > len(raw):
+                    raise ValueError("truncated episode character record")
+                (
+                    player_id, x, y, nxs, nys, facing, damage, stocks,
+                    ground, jump_count, shield_power, flags, atk_exec, controls,
+                ) = _BINARY_CHAR.unpack_from(raw, offset)
+                offset += _BINARY_CHAR.size
+                chars.append({
+                    "id": player_id,
+                    "name": self._char_names.get(player_id, f"P{player_id}"),
+                    "x": x, "y": y, "nxs": nxs, "nys": nys,
+                    "facing": facing, "damage": damage, "stocks": stocks,
+                    "ground": ground, "jumpCount": jump_count,
+                    "shieldPower": shield_power,
+                    "shielding": 1 if flags & 1 else 0,
+                    "hitstun": 1 if flags & 2 else 0,
+                    "atkFrame": 1 if flags & 4 else 0,
+                    "atkExec": atk_exec,
+                    "hanging": 1 if flags & 8 else 0,
+                    "dead": 1 if flags & 16 else 0,
+                    "controls": controls,
+                })
+            frames.append({
+                "frame": frame, "paused": paused, "ended": ended, "chars": chars,
+            })
+        self._events.put({
+            "type": "episode",
+            "generation": generation,
+            "frames": frames,
+        })
 
     def _dispatch(self, msg: dict[str, Any]) -> None:
         state = msg.get("state") if isinstance(msg.get("state"), dict) else msg
@@ -368,6 +438,32 @@ class SSF2Bridge:
                 continue
             self._deferred_events.append(event)
 
+    def wait_episode(self, timeout: float = 30.0) -> dict[str, Any]:
+        """Wait for a bulk episode transfer (triggered by get_episode)."""
+        deadline = time.monotonic() + timeout
+        while True:
+            for event in list(self._deferred_events):
+                if event.get("type") == "disconnected":
+                    self._deferred_events.remove(event)
+                    raise BridgeError("bridge disconnected while waiting for episode")
+                if event.get("type") == "protocol_error":
+                    self._deferred_events.remove(event)
+                    raise BridgeError(event.get("message", "bridge protocol error"))
+                if event.get("type") == "episode":
+                    self._deferred_events.remove(event)
+                    return event
+                # Skip non-episode events (e.g. episode_ready ack)
+                self._deferred_events.remove(event)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError("timed out waiting for episode")
+            try:
+                event = self._events.get(timeout=min(remaining, 0.25))
+            except queue.Empty:
+                continue
+            self._deferred_events.append(event)
+
     # -- outbound ------------------------------------------------------------
 
     def _send(self, msg: dict[str, Any]) -> None:
@@ -399,6 +495,26 @@ class SSF2Bridge:
         if not isinstance(player, int) or player < 0:
             raise BridgeError(f"invalid overlay player: {player!r}")
         self._send({"type": "overlay", "player": player})
+
+    def start_recording(self) -> int:
+        """Begin buffering frames game-side; use ``wait_reply(request, "ack")``."""
+        return self._send_request("start_recording")
+
+    def stop_recording(self) -> int:
+        """Stop buffering; use ``wait_reply(request, "ack")``."""
+        return self._send_request("stop_recording")
+
+    def get_episode(self) -> int:
+        """Request the buffered episode; use ``wait_reply(request, "episode")``."""
+        return self._send_request("get_episode")
+
+    def load_replay(self, replay_json: dict) -> int:
+        """Load a replay from parsed JSON; use ``wait_reply(request, "ack")``."""
+        with self._request_lock:
+            request = self._next_request
+            self._next_request += 1
+        self._send({"type": "load_replay", "request": request, "replay": replay_json})
+        return request
 
     def ping(self) -> None:
         self._send({"type": "ping"})

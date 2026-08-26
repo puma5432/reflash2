@@ -8,6 +8,7 @@ package com.mcleodgaming.ssf2.modapi
    import com.mcleodgaming.ssf2.engine.Character;
    import com.mcleodgaming.ssf2.engine.GameTimer;
    import com.mcleodgaming.ssf2.engine.Projectile;
+   import com.mcleodgaming.ssf2.engine.ReplayData;
    import com.mcleodgaming.ssf2.engine.StageData;
    import com.mcleodgaming.ssf2.enums.Mode;
    import com.mcleodgaming.ssf2.input.*;
@@ -83,6 +84,13 @@ package com.mcleodgaming.ssf2.modapi
       private static var _rlStateTransport:String = "json";
 
       private static var _rlBinaryBuffer:ByteArray = new ByteArray();
+
+      // Episode recording: buffer per-frame records for bulk transfer at end.
+      private static var _rlEpisodeBuffer:ByteArray = new ByteArray();
+
+      private static var _rlEpisodeFrameCount:int = 0;
+
+      private static var _rlEpisodeRecording:Boolean = false;
 
       // Controls overlay: shows the held control bits for one player slot.
       // _rlOverlayPlayer == 0 means disabled.
@@ -962,6 +970,98 @@ package com.mcleodgaming.ssf2.modapi
          }
       }
 
+      /** Buffer one frame record for episode collection (no socket send). */
+      private static function rlBufferFrame() : void
+      {
+         if(!isReady())
+         {
+            return;
+         }
+         var _loc1_:ByteArray = _rlEpisodeBuffer;
+         _loc1_.endian = Endian.BIG_ENDIAN;
+         _loc1_.writeInt(_api.ElapsedFrames);
+         _loc1_.writeByte(_api.Paused ? 1 : 0);
+         _loc1_.writeByte(_api.GameEnded ? 1 : 0);
+         var _loc2_:* = _api.Characters;
+         var _loc3_:int = 0;
+         var _loc4_:int = 0;
+         while(_loc4_ < _loc2_.length)
+         {
+            if(_loc2_[_loc4_])
+            {
+               _loc3_++;
+            }
+            _loc4_++;
+         }
+         _loc1_.writeByte(_loc3_);
+         _loc4_ = 0;
+         while(_loc4_ < _loc2_.length)
+         {
+            var _loc5_:Character = _loc2_[_loc4_];
+            if(_loc5_)
+            {
+               var _loc6_:String = _loc5_.getCurrentAttackFrame();
+               var _loc7_:int = 0;
+               _loc7_ |= _loc5_.Shielding ? 1 : 0;
+               _loc7_ |= _loc5_.isHitStunOrParalysis() ? 2 : 0;
+               _loc7_ |= _loc6_ != null ? 4 : 0;
+               _loc7_ |= _loc5_.Hanging ? 8 : 0;
+               _loc7_ |= _loc5_.Dead ? 16 : 0;
+               _loc1_.writeInt(_loc5_.ID);
+               _loc1_.writeFloat(_loc5_.X);
+               _loc1_.writeFloat(_loc5_.Y);
+               _loc1_.writeFloat(_loc5_.netXSpeed());
+               _loc1_.writeFloat(_loc5_.netYSpeed());
+               _loc1_.writeByte(_loc5_.FacingRight ? 1 : 0);
+               _loc1_.writeFloat(_loc5_.getDamage());
+               _loc1_.writeShort(Boolean(_loc5_.getMatchResults()) ? int(_loc5_.getMatchResults().StockRemaining) : int(_loc5_.getLives()));
+               _loc1_.writeByte(Boolean(_loc5_.CollisionObj) && Boolean(_loc5_.CollisionObj.ground) ? 1 : 0);
+               _loc1_.writeShort(_loc5_.JumpCount);
+               _loc1_.writeFloat(_loc5_.ShieldPower);
+               _loc1_.writeShort(_loc7_);
+               _loc1_.writeFloat(_loc6_ != null ? _loc5_.getExecTime() : 0);
+               _loc1_.writeInt(_loc5_.getControlBitsAPI(false));
+            }
+            _loc4_++;
+         }
+         _rlEpisodeFrameCount++;
+      }
+
+      /** Send the buffered episode as one compressed binary transfer. */
+      private static function rlSendEpisode(param1:int) : void
+      {
+         var _loc1_:Socket = _rlClient;
+         if(_loc1_ == null || !_loc1_.connected)
+         {
+            return;
+         }
+         _rlEpisodeRecording = false;
+         var _loc2_:ByteArray = new ByteArray();
+         _loc2_.endian = Endian.BIG_ENDIAN;
+         _loc2_.writeUnsignedInt(0x45504930);
+         _loc2_.writeInt(_rlMatchGeneration);
+         _loc2_.writeInt(_rlEpisodeFrameCount);
+         var _loc3_:ByteArray = new ByteArray();
+         _loc3_.endian = Endian.BIG_ENDIAN;
+         _loc3_.writeBytes(_rlEpisodeBuffer);
+         _loc3_.compress();
+         _loc2_.writeUnsignedInt(_loc3_.length);
+         _loc2_.writeBytes(_loc3_);
+         try
+         {
+            _loc1_.writeBytes(_loc2_);
+            _loc1_.flush();
+            rlSend({"type":"episode_ready","request":param1,"frames":_rlEpisodeFrameCount,"bytes":_loc2_.length});
+         }
+         catch(e:Error)
+         {
+            if(_rlClient === _loc1_)
+            {
+               _rlClient = null;
+            }
+         }
+      }
+
       private static function rlOnData(param1:ProgressEvent) : void
       {
          if(_rlClient == null || (param1 != null && param1.currentTarget !== _rlClient))
@@ -1022,6 +1122,22 @@ package com.mcleodgaming.ssf2.modapi
          {
             rlSetOverlay(int(_loc2_.player));
          }
+         else if(_loc3_ == "start_recording")
+         {
+            _rlEpisodeBuffer.clear();
+            _rlEpisodeFrameCount = 0;
+            _rlEpisodeRecording = true;
+            rlSend({"type":"ack","request":int(_loc2_.request),"command":"start_recording"});
+         }
+         else if(_loc3_ == "stop_recording")
+         {
+            _rlEpisodeRecording = false;
+            rlSend({"type":"ack","request":int(_loc2_.request),"command":"stop_recording","frames":_rlEpisodeFrameCount});
+         }
+         else if(_loc3_ == "get_episode")
+         {
+            rlSendEpisode(int(_loc2_.request));
+         }
          else if(_loc3_ == "state")
          {
             if(isReady())
@@ -1052,6 +1168,10 @@ package com.mcleodgaming.ssf2.modapi
          else if(_loc3_ == "restart_match")
          {
             rlRestartMatch(_loc2_.config is Object ? _loc2_.config : null,int(_loc2_.request));
+         }
+         else if(_loc3_ == "load_replay")
+         {
+            rlLoadReplay(_loc2_.replay is Object ? _loc2_.replay : null,int(_loc2_.request));
          }
          else if(_loc3_ == "pause")
          {
@@ -1170,6 +1290,10 @@ package com.mcleodgaming.ssf2.modapi
          }
          rlUpdateOverlay();
          _rlStateCount++;
+         if(_rlEpisodeRecording)
+         {
+            rlBufferFrame();
+         }
          if(_rlPauseAfterTick)
          {
             var _loc2_:int = _rlStepRequest;
@@ -1851,6 +1975,72 @@ package com.mcleodgaming.ssf2.modapi
             _rlRestartConfig = null;
             rlSend({"type":"error","request":param2,"command":"restart_match","message":e.message});
             trace("[ModAPI RL] restartMatch failed: " + e.message);
+         }
+      }
+
+      /**
+       * Load a replay from parsed JSON and start the match in replay mode.
+       * Replicates the VaultMenu replay loading flow without the menu UI.
+       */
+      public static function rlLoadReplay(param1:Object, param2:int = -1) : void
+      {
+         try
+         {
+            if(!param1)
+            {
+               rlSend({"type":"error","request":param2,"command":"load_replay","message":"no replay data"});
+               return;
+            }
+            // Create ReplayData from the parsed JSON
+            var _loc1_:ReplayData = new ReplayData(Main.MAXPLAYERS);
+            _loc1_.importReplay(JSON.stringify(param1));
+            // Validate version
+            if(_loc1_.VersionNumber != Version.getVersion() && ReplayData.COMPATIBLE_VERSIONS.indexOf(_loc1_.VersionNumber) < 0)
+            {
+               rlSend({"type":"error","request":param2,"command":"load_replay","message":"incompatible replay version: " + _loc1_.VersionNumber});
+               return;
+            }
+            // Create the game with the replay's player count and mode
+            var _loc2_:int = _loc1_.PlayerData.length;
+            var _loc3_:Game = new Game(_loc2_,Mode.VS);
+            _loc3_.ReplayDataObj = _loc1_;
+            // Import replay settings (stage, items, players) — replicates initReplay()
+            _loc3_.importSettings({
+               "levelData":_loc1_.MatchSettings,
+               "items":_loc1_.ItemSettingsObj,
+               "playerSettings":_loc1_.PlayerData
+            });
+            _loc3_.PauseEnabled = false;
+            // Seed RNG from replay for determinism
+            _loc3_.LevelData.randSeed = _loc1_.MatchSettings.randSeed;
+            Utils.setRandSeed(_loc3_.LevelData.randSeed);
+            Utils.shuffleRandom();
+            // Queue resources
+            ResourceManager.queueResources([_loc3_.LevelData.stage]);
+            var _loc4_:int = 0;
+            while(_loc4_ < _loc3_.PlayerSettings.length)
+            {
+               var _loc5_:PlayerSetting = _loc3_.PlayerSettings[_loc4_];
+               if(Boolean(_loc5_) && Boolean(_loc5_.exist) && Boolean(_loc5_.character != null) && _loc5_.character != "xp")
+               {
+                  ResourceManager.queueResources([_loc5_.character == "random" ? Main.RandCharList[_loc4_].StatsName : _loc5_.character]);
+               }
+               _loc4_++;
+            }
+            // Start the match
+            GameController.isStarted = true;
+            ResourceManager.load({"oncomplete":function(...args):void
+            {
+               MenuController.disposeAllMenus();
+               GameController.startMatch(_loc3_);
+            }});
+            rlSend({"type":"ack","request":param2,"command":"load_replay","frames":_loc1_.FrameCount});
+            trace("[ModAPI RL] Replay loaded: " + _loc1_.Name + " (" + _loc1_.FrameCount + " frames)");
+         }
+         catch(e:Error)
+         {
+            rlSend({"type":"error","request":param2,"command":"load_replay","message":e.message});
+            trace("[ModAPI RL] loadReplay failed: " + e.message);
          }
       }
    }
