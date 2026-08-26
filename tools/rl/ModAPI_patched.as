@@ -940,6 +940,7 @@ package com.mcleodgaming.ssf2.modapi
                _loc4_.writeFloat(_loc8_.ShieldPower);
                _loc4_.writeShort(_loc10_);
                _loc4_.writeFloat(_loc9_ != null ? _loc8_.getExecTime() : 0);
+               _loc4_.writeInt(_loc8_.getControlBitsAPI(false));
             }
             _loc7_++;
          }
@@ -1239,7 +1240,8 @@ package com.mcleodgaming.ssf2.modapi
                   "atkFrame":_loc5_ != null ? 1 : 0,
                   "atkExec":_loc5_ != null ? _loc4_.getExecTime() : 0,
                   "hanging":_loc4_.Hanging ? 1 : 0,
-                  "dead":_loc4_.Dead ? 1 : 0
+                  "dead":_loc4_.Dead ? 1 : 0,
+                  "controls":_loc4_.getControlBitsAPI(false)
                });
             }
             _loc3_++;

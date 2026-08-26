@@ -8,7 +8,7 @@ def test_binary_step_complete_decodes_minimal_state() -> None:
     bridge._char_names = {1: "Marth"}
     flags = 1 | 2 | 4 | 8 | 16
     payload = _BINARY_PREFIX.pack(7, 3, 42, 1, 0, 1, 0) + _BINARY_CHAR.pack(
-        1, 10.5, -20.25, 1.5, -2.5, 1, 37.0, 4, 1, 2, 75.0, flags, 6.0
+        1, 10.5, -20.25, 1.5, -2.5, 1, 37.0, 4, 1, 2, 75.0, flags, 6.0, 0
     )
 
     bridge._dispatch_binary_state(2, payload)

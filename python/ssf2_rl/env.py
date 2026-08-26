@@ -320,6 +320,71 @@ class SSF2Env(gym.Env):
         print(f"run(): {n} frames, {self._dropped_frames} dropped")
         return traj
 
+    def record_human(
+        self,
+        player_id: int,
+        frames: Optional[int] = None,
+        until_done: bool = True,
+    ) -> list[tuple[int, int]]:
+        """Record a human player's held controls as a ScriptedBot script.
+
+        Runs the match in normal (non-lockstep) mode so the human can play in
+        real time. Reads the character's actual held control bits each frame
+        and RLE-compresses consecutive identical masks into ``(mask, count)``
+        tuples — the exact format ``ScriptedBot`` expects.
+
+        Args:
+            player_id: which slot to record (must be a Human declaration).
+            frames: maximum frames to record (None = until match ends).
+            until_done: stop when the match ends / a stock hits 0.
+
+        Returns:
+            List of ``(mask, frames)`` tuples ready for ``ScriptedBot``.
+        """
+        if self.lockstep:
+            raise BridgeError("record_human requires normal (non-lockstep) mode")
+        decl = self.players.get(player_id)
+        if not isinstance(decl, Human):
+            raise ValueError(f"player {player_id} is not a Human declaration")
+
+        bridge = self._connect()
+        prev = self._last_state
+        if prev is None:
+            raise BridgeError("call reset() before record_human()")
+
+        script: list[tuple[int, int]] = []
+        current_mask: Optional[int] = None
+        current_count = 0
+        n = 0
+
+        while frames is None or n < frames:
+            state = bridge.wait_state(timeout=self.step_timeout, min_frame=prev["frame"] + 1)
+            prev = state
+            n += 1
+
+            # Extract the human's held controls from the state.
+            char = next((c for c in state["chars"] if c["id"] == player_id), None)
+            mask = char["controls"] if char else 0
+
+            if mask != current_mask:
+                if current_count > 0:
+                    script.append((current_mask, current_count))
+                current_mask = mask
+                current_count = 1
+            else:
+                current_count += 1
+
+            if until_done and (bool(state["ended"]) or self._any_ko(state)):
+                break
+
+        # Flush the final run.
+        if current_count > 0 and current_mask is not None:
+            script.append((current_mask, current_count))
+
+        self._last_state = prev
+        print(f"record_human(): {n} frames -> {len(script)} script entries")
+        return script
+
     def close(self) -> None:
         if self._bridge is not None:
             if self.lockstep and self._lockstep_paused:

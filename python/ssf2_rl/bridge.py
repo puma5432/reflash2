@@ -37,7 +37,7 @@ DEFAULT_PORT = 4567
 _BINARY_MAGIC = b"RLB3"
 _BINARY_HEADER = struct.Struct(">4sBBHI")
 _BINARY_PREFIX = struct.Struct(">iiiBBBB")
-_BINARY_CHAR = struct.Struct(">iffffBfhBhfHf")
+_BINARY_CHAR = struct.Struct(">iffffBfhBhfHfi")
 _MAX_BINARY_PAYLOAD = 1024 * 1024
 
 
@@ -196,7 +196,7 @@ class SSF2Bridge:
         for _ in range(char_count):
             (
                 player_id, x, y, nxs, nys, facing, damage, stocks,
-                ground, jump_count, shield_power, flags, atk_exec,
+                ground, jump_count, shield_power, flags, atk_exec, controls,
             ) = _BINARY_CHAR.unpack_from(payload, offset)
             offset += _BINARY_CHAR.size
             chars.append({
@@ -218,6 +218,7 @@ class SSF2Bridge:
                 "atkExec": atk_exec,
                 "hanging": 1 if flags & 8 else 0,
                 "dead": 1 if flags & 16 else 0,
+                "controls": controls,
             })
         self.match_generation = generation
         state = {

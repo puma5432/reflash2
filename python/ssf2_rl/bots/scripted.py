@@ -104,3 +104,39 @@ class ScriptedBot(Bot):
         mask, _ = self._entries[self._cursor - 1]
         self._remaining -= 1
         return mask
+
+
+def save_recording(script: Sequence[tuple[int, int]], path: str) -> None:
+    """Save a recorded script to a JSON file.
+
+    Args:
+        script: list of ``(mask, frames)`` tuples from ``env.record_human()``.
+        path: output file path (e.g. ``"recordings/dashdance.json"``).
+    """
+    import json
+    from datetime import datetime, timezone
+
+    data = {
+        "format": "ssf2-script-v1",
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "entries": len(script),
+        "total_frames": sum(f for _, f in script),
+        "script": [[m, f] for m, f in script],
+    }
+    with open(path, "w") as fh:
+        json.dump(data, fh, indent=2)
+
+
+def load_recording(path: str) -> list[tuple[int, int]]:
+    """Load a recorded script from a JSON file.
+
+    Returns:
+        List of ``(mask, frames)`` tuples ready for ``ScriptedBot``.
+    """
+    import json
+
+    with open(path) as fh:
+        data = json.load(fh)
+    if data.get("format") != "ssf2-script-v1":
+        raise ValueError(f"unrecognized recording format in {path}")
+    return [(int(m), int(f)) for m, f in data["script"]]
