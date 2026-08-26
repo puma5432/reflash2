@@ -393,6 +393,12 @@ class SSF2Bridge:
         """Convert a player slot to CPU control so the bridge can drive it."""
         self._send({"type": "takeover", "player": int(player)})
 
+    def set_overlay(self, player: int) -> None:
+        """Show held controls for a player slot in-game (0 hides the overlay)."""
+        if not isinstance(player, int) or player < 0:
+            raise BridgeError(f"invalid overlay player: {player!r}")
+        self._send({"type": "overlay", "player": player})
+
     def ping(self) -> None:
         self._send({"type": "ping"})
 

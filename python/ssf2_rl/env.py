@@ -76,6 +76,7 @@ class SSF2Env(gym.Env):
         players: Optional[dict[int, Player]] = None,
         stage: Union[str, Stage] = "finaldestination",
         lives: int = 99,
+        render_controls: int = 0,
     ) -> None:
         self._host = host
         self._port = port
@@ -95,6 +96,7 @@ class SSF2Env(gym.Env):
         self.config = config
         self.stage = stage
         self.lives = lives
+        self.render_controls = int(render_controls)
         # Default matchup: the agent slot is step-driven (Agent), the
         # opponent is the in-game CPU at level 0 (docile).
         self.players: dict[int, Player] = players or {
@@ -138,6 +140,7 @@ class SSF2Env(gym.Env):
         options: Optional[dict] = None,
         players: Optional[dict[int, Player]] = None,
         stage: Optional[Union[str, Stage]] = None,
+        render_controls: Optional[int] = None,
     ):
         """Restart the match and take over the bot slots.
 
@@ -146,6 +149,8 @@ class SSF2Env(gym.Env):
                 (e.g. ``{1: Agent(Character.Marth), 2: CPU(Character.Samus, level=0)}``).
             stage: optional per-reset stage override — a ``Stage`` member or
                 raw id (see ``players.STAGES``).
+            render_controls: optional per-reset overlay override — show held
+                controls for this player slot in-game (0 hides the overlay).
         """
         super().reset(seed=seed)
         if players is not None:
@@ -153,6 +158,8 @@ class SSF2Env(gym.Env):
             self.players = players
         if stage is not None:
             self.stage = stage
+        if render_controls is not None:
+            self.render_controls = int(render_controls)
 
         # Build the match config from the declarations (unless a raw config
         # was passed to the constructor, which still takes precedence).
@@ -179,6 +186,8 @@ class SSF2Env(gym.Env):
                 # native CPU AI would fill any frame with no queued override.
                 bridge.send_input(pid, 0)
                 decl.reset()
+        # Show/hide the in-game controls overlay for the requested slot.
+        bridge.set_overlay(self.render_controls)
         if self.lockstep:
             request = bridge.pause()
             reply = bridge.wait_reply(request, "ack", timeout=self.step_timeout)
