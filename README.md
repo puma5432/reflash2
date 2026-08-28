@@ -1,3 +1,10 @@
+# ReFlash 2
+
+This is a machine learning-oriented fork of ReFlash2. The goal of this repository is to create an AI agent capable of superhuman play in the game Super Smash Flash 2 using a combination of superivsed learning (aka behavioral cloning) and reinforcement learning. 
+
+
+README inherited from upstream:
+
 # ReFlash2
 Super Smash Flash 2, rebuilt with quality-of-life changes, modding-friendly features and a community-driven API for custom content.
 
