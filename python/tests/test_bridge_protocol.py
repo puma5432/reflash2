@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from ssf2_rl.bridge import SSF2Bridge, _BINARY_CHAR, _BINARY_PREFIX
+from ssf2_rl.protocol.binary import BINARY_CHAR, BINARY_PREFIX, decode_binary_state
 
 
 def test_binary_step_complete_decodes_minimal_state() -> None:
-    bridge = SSF2Bridge(state_transport="json")
-    bridge._char_names = {1: "Marth"}
     flags = 1 | 2 | 4 | 8 | 16
-    payload = _BINARY_PREFIX.pack(7, 3, 42, 1, 0, 1, 0) + _BINARY_CHAR.pack(
+    payload = BINARY_PREFIX.pack(7, 3, 42, 1, 0, 1, 0) + BINARY_CHAR.pack(
         1, 10.5, -20.25, 1.5, -2.5, 1, 37.0, 4, 1, 2, 75.0, flags, 6.0, 0
     )
 
-    bridge._dispatch_binary_state(2, payload)
-
-    event = bridge._events.get_nowait()
+    event, generation = decode_binary_state(2, payload, {1: "Marth"})
+    assert generation == 3
     assert event["type"] == "step_complete"
     assert event["request"] == 7
     state = event["state"]
@@ -31,6 +28,7 @@ def test_binary_step_complete_decodes_minimal_state() -> None:
 
 
 def test_match_ready_caches_names_metadata_and_generation() -> None:
+    from ssf2_rl.protocol.bridge import SSF2Bridge
     bridge = SSF2Bridge(state_transport="json")
     bridge._dispatch({
         "type": "match_ready",

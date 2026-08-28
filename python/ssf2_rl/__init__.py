@@ -1,13 +1,9 @@
-"""SSF2 RL research bridge client.
+"""Public API for SSF2 research environments and policy tooling."""
 
-Talks to the instrumented ReFlash2 research build over a loopback TCP socket
-(newline-delimited JSON). The game streams one state snapshot per simulation
-frame (30 FPS) and accepts one-frame input masks for CPU-controlled characters.
-"""
-
-from .actions import ACTION_TABLE, ACTION_NAMES, ACTION_MASKS, action_index
-from .bridge import SSF2Bridge, BridgeError
-from .controls import (
+from .data import Episode
+from .env import SSF2Env
+from .game.catalog import CHARACTERS, RANDOM, STAGES, Character, Stage
+from .game.controls import (
     ALL_BITS,
     ATTACK,
     AUTO_DASH,
@@ -37,16 +33,14 @@ from .controls import (
     bit_name_map,
     describe_mask,
 )
-from .launcher import (
+from .game.launcher import (
     LaunchError,
     ensure_game_running,
     game_log_path,
     port_open,
     stop_game,
 )
-from .players import (
-    CHARACTERS,
-    STAGES,
+from .game.players import (
     CPU,
     Character,
     Human,
@@ -55,20 +49,24 @@ from .players import (
     build_match_config,
     describe_matchup,
 )
-from .bots import Agent, Bot, FollowBot, PolicyBot, ScriptedBot, ZeroBot
-from .obs import (
+from .policy import ACTION_TABLE, ACTION_NAMES, ACTION_MASKS, action_index
+from .policy.bots import Agent, Bot, FollowBot, PolicyBot, ScriptedBot, ZeroBot
+from .policy.observation import (
     CHAR_FEATURES,
     OBS_DIM,
     build_obs,
     char_vec,
     obs_feature_names,
     pick_chars,
-    reward_delta,
 )
+from .policy.reward import reward_delta
+from .protocol import BridgeError, SSF2Bridge
 
 __all__ = [
     "SSF2Bridge",
     "BridgeError",
+    "SSF2Env",
+    "Episode",
     "Controls",
     "BITS",
     "bit_name_map",
@@ -104,6 +102,7 @@ __all__ = [
     "stop_game",
     "CHARACTERS",
     "STAGES",
+    "RANDOM",
     "Character",
     "Stage",
     "CPU",

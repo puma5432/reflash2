@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 
-from ssf2_rl.env import SSF2Env
+from ssf2_rl.env.gym_env import SSF2Env
 
 
 def main() -> int:

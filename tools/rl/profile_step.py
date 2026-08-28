@@ -18,9 +18,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 
-from ssf2_rl.bots import ZeroBot  # noqa: E402
-from ssf2_rl.env import SSF2Env  # noqa: E402
-from ssf2_rl.players import Character, Stage  # noqa: E402
+from ssf2_rl.policy.bots import ZeroBot  # noqa: E402
+from ssf2_rl.env.gym_env import SSF2Env  # noqa: E402
+from ssf2_rl.game.catalog import Character, Stage  # noqa: E402
 
 
 def pct(values: list[float], p: float) -> float:

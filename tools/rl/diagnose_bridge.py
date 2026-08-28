@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 
 from ssf2_rl import SSF2Bridge  # noqa: E402
-from ssf2_rl.controls import BITS, describe_mask  # noqa: E402
+from ssf2_rl.game.controls import BITS, describe_mask  # noqa: E402
 
 RIGHT = BITS["RIGHT"]
 

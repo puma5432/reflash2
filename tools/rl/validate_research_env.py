@@ -6,9 +6,10 @@ from __future__ import annotations
 import argparse
 from time import perf_counter
 
-from ssf2_rl.bots import Agent, ZeroBot
-from ssf2_rl.env import SSF2Env
-from ssf2_rl.players import CPU, Human, Character, Stage
+from ssf2_rl.policy.bots import Agent, ZeroBot
+from ssf2_rl.env.gym_env import SSF2Env
+from ssf2_rl.game.catalog import Character, Stage
+from ssf2_rl.game.players import CPU, Human
 
 
 def validate_reported_bugs(normal_frames: int) -> None:
