@@ -1,7 +1,7 @@
 """Gymnasium environment wrapping the SSF2 research bridge."""
 from __future__ import annotations
 from time import perf_counter
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 import numpy as np
 try:
     import gymnasium as gym
@@ -26,10 +26,10 @@ class SSF2Env(gym.Env):
     metadata = {"render_modes": []}
     def __init__(self,
                  players: Optional[dict[int, Player]] = None,
-                 max_episode_frames: int = 30 * 120,
                  step_timeout: float = 5.0,
                  lockstep: bool = False,
                  lockstep_mode: str = "render",
+                 max_episode_frames: int = 30 * 120,
 
                  auto_launch: bool = True,
                  host: str = DEFAULT_HOST,
@@ -215,8 +215,17 @@ class SSF2Env(gym.Env):
     def replay_ssfrec(self,
                       path: str,
                       collect: bool = True,
-                      timeout: float = 30.) -> Episode:
-        return replay_ssfrec(self, path, collect, timeout)
+                      timeout: float = 30.,
+                      speed: Literal["realtime", "fast"] = "realtime",
+                      batch_frames: int = 256) -> Episode:
+        """Play a native replay, optionally collecting it at real-time or fast speed."""
+        if speed not in {"realtime", "fast"}:
+            raise ValueError("speed must be 'realtime' or 'fast'")
+        if not isinstance(batch_frames, int) or isinstance(batch_frames, bool) or not 0 < batch_frames <= 4096:
+            raise ValueError("batch_frames must be an integer from 1 through 4096")
+        if speed == "fast" and not collect:
+            raise ValueError("speed='fast' requires collect=True")
+        return replay_ssfrec(self, path, collect, timeout, speed, batch_frames)
 
     def close(self) -> None:
         if self._bridge:

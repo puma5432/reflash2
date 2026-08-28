@@ -288,9 +288,20 @@ class SSF2Bridge:
     def step_frame(self) -> int: return self._send_request("step")
     def step_frame_sync(self) -> int: return self._send_request("step_sync")
     def resume(self) -> int: return self._send_request("resume")
-    def load_replay(self, replay_json: dict) -> int:
+    def fast_replay_batch(self, max_frames: int) -> int:
+        """Advance a paused native replay and wait for `fast_replay_complete`."""
+        if not isinstance(max_frames, int) or isinstance(max_frames, bool) or not 0 < max_frames <= 4096:
+            raise BridgeError("max_frames must be an integer from 1 through 4096")
+        with self._request_lock:
+            request = self._next_request; self._next_request += 1
+        self._send({"type": "fast_replay_batch", "request": request, "max_frames": max_frames})
+        return request
+    def load_replay(self, replay_json: dict, pause_on_start: bool = False) -> int:
         with self._request_lock: request = self._next_request; self._next_request += 1
-        self._send({"type": "load_replay", "request": request, "replay": replay_json})
+        message = {"type": "load_replay", "request": request, "replay": replay_json}
+        if pause_on_start:
+            message["pause_on_start"] = True
+        self._send(message)
         return request
 
     def request_full_state(self, timeout: float = 5.0) -> dict[str, Any]:

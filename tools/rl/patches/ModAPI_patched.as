@@ -56,6 +56,10 @@ package com.mcleodgaming.ssf2.modapi
    *   client -> game: {"type":"restart_match","request":N,"config":{}}
    *       -> {"type":"restart_accepted","request":N,"generation":G}
    *       -> {"type":"match_ready","request":N,"generation":G,"state":{...}}
+   *   client -> game: {"type":"load_replay","request":N,"replay":{},"pause_on_start":true}
+   *       -> pauses after its first live replay tick when requested
+   *   client -> game: {"type":"fast_replay_batch","request":N,"max_frames":256}
+   *       -> {"type":"fast_replay_complete","request":N,"advanced":N,"done":0|1,"state":{...}}
     */
    public class ModAPI
    {
@@ -91,6 +95,17 @@ package com.mcleodgaming.ssf2.modapi
       private static var _rlEpisodeFrameCount:int = 0;
 
       private static var _rlEpisodeRecording:Boolean = false;
+
+      // Fast replay batches run direct simulation while preserving the normal
+      // episode buffer. A batch is deliberately bounded by the client.
+      private static var _rlFastReplayActive:Boolean = false;
+
+      private static var _rlFastReplayRequest:int = -1;
+
+      private static var _rlFastReplayAdvanced:int = 0;
+
+      // Set only by fast replay loading; consumed after its first live tick.
+      private static var _rlPauseReplayOnStart:Boolean = false;
 
       // Controls overlay: shows the held control bits for one player slot.
       // _rlOverlayPlayer == 0 means disabled.
@@ -149,6 +164,10 @@ package com.mcleodgaming.ssf2.modapi
          _rlLockstep = false;
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
+         _rlFastReplayActive = false;
+         _rlFastReplayRequest = -1;
+         _rlFastReplayAdvanced = 0;
+         _rlPauseReplayOnStart = false;
          rlDetach();
          _api = null;
          _isInitialized = false;
@@ -846,6 +865,10 @@ package com.mcleodgaming.ssf2.modapi
          _rlLockstep = false;
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
+         _rlFastReplayActive = false;
+         _rlFastReplayRequest = -1;
+         _rlFastReplayAdvanced = 0;
+         _rlPauseReplayOnStart = false;
          _rlClient = null;
       }
 
@@ -864,6 +887,10 @@ package com.mcleodgaming.ssf2.modapi
          _rlLockstep = false;
          _rlPauseAfterTick = false;
          _rlStepRequest = -1;
+         _rlFastReplayActive = false;
+         _rlFastReplayRequest = -1;
+         _rlFastReplayAdvanced = 0;
+         _rlPauseReplayOnStart = false;
          _rlClient = null;
       }
 
@@ -1171,7 +1198,7 @@ package com.mcleodgaming.ssf2.modapi
          }
          else if(_loc3_ == "load_replay")
          {
-            rlLoadReplay(_loc2_.replay is Object ? _loc2_.replay : null,int(_loc2_.request));
+            rlLoadReplay(_loc2_.replay is Object ? _loc2_.replay : null,int(_loc2_.request),Boolean(_loc2_.pause_on_start));
          }
          else if(_loc3_ == "pause")
          {
@@ -1185,6 +1212,10 @@ package com.mcleodgaming.ssf2.modapi
          {
             rlStepSync(int(_loc2_.request));
          }
+         else if(_loc3_ == "fast_replay_batch")
+         {
+            rlFastReplayBatch(int(_loc2_.request),int(_loc2_.max_frames));
+         }
          else if(_loc3_ == "resume")
          {
             rlResume(int(_loc2_.request));
@@ -1194,6 +1225,11 @@ package com.mcleodgaming.ssf2.modapi
       /** Silently pause simulation and return an acknowledged paused snapshot. */
       private static function rlPause(param1:int) : void
       {
+         if(_rlFastReplayActive)
+         {
+            rlSend({"type":"error","request":param1,"command":"pause","message":"fast replay batch is in progress"});
+            return;
+         }
          if(!isReady())
          {
             rlSend({"type":"error","request":param1,"command":"pause","message":"game is not ready"});
@@ -1217,6 +1253,11 @@ package com.mcleodgaming.ssf2.modapi
       /** Permit exactly one game tick; rlOnTick() re-pauses and completes it. */
       private static function rlStep(param1:int) : void
       {
+         if(_rlFastReplayActive)
+         {
+            rlSend({"type":"error","request":param1,"command":"step","message":"fast replay batch is in progress"});
+            return;
+         }
          if(!isReady() || !_rlLockstep || !_api.ResearchPaused || _rlPauseAfterTick)
          {
             rlSend({"type":"error","request":param1,"command":"step","message":"step requires an idle lockstep pause"});
@@ -1230,6 +1271,11 @@ package com.mcleodgaming.ssf2.modapi
       /** Pump one simulation frame immediately instead of waiting for render. */
       private static function rlStepSync(param1:int) : void
       {
+         if(_rlFastReplayActive)
+         {
+            rlSend({"type":"error","request":param1,"command":"step_sync","message":"fast replay batch is in progress"});
+            return;
+         }
          if(!isReady() || !_rlLockstep || !_api.ResearchPaused || _rlPauseAfterTick)
          {
             rlSend({"type":"error","request":param1,"command":"step_sync","message":"step requires an idle lockstep pause"});
@@ -1257,6 +1303,11 @@ package com.mcleodgaming.ssf2.modapi
       /** Leave lockstep mode and resume normal simulation. */
       private static function rlResume(param1:int) : void
       {
+         if(_rlFastReplayActive)
+         {
+            rlSend({"type":"error","request":param1,"command":"resume","message":"fast replay batch is in progress"});
+            return;
+         }
          if(!isReady())
          {
             rlSend({"type":"error","request":param1,"command":"resume","message":"game is not ready"});
@@ -1273,12 +1324,89 @@ package com.mcleodgaming.ssf2.modapi
       }
 
       /**
+       * Advance a paused native replay without render-frame or socket state
+       * traffic. rlOnTick buffers each completed frame and re-establishes the
+       * silent pause required by the next direct step.
+       */
+      private static function rlFastReplayBatch(param1:int, param2:int) : void
+      {
+         if(_rlFastReplayActive)
+         {
+            rlSend({"type":"error","request":param1,"command":"fast_replay_batch","message":"fast replay batch is already in progress"});
+            return;
+         }
+         if(!isReady() || !_rlEpisodeRecording || !_api.ReplayMode || !_api.ResearchPaused || param2 <= 0)
+         {
+            rlSend({"type":"error","request":param1,"command":"fast_replay_batch","message":"fast replay batch requires recording, a paused active replay, and positive frame count"});
+            return;
+         }
+         _rlFastReplayActive = true;
+         _rlFastReplayRequest = param1;
+         _rlFastReplayAdvanced = 0;
+         var _loc3_:Boolean = false;
+         var _loc4_:Boolean = false;
+         try
+         {
+            while(_rlFastReplayAdvanced < param2 && !_api.GameEnded && _api.ElapsedFrames < _api.ReplayDataObj.FrameCount)
+            {
+               if(!_api.stepResearchFrame())
+               {
+                  _loc4_ = true;
+                  break;
+               }
+               _rlFastReplayAdvanced++;
+            }
+            _loc3_ = _api.GameEnded || _api.ElapsedFrames >= _api.ReplayDataObj.FrameCount;
+         }
+         catch(e:Error)
+         {
+            _loc4_ = true;
+         }
+         finally
+         {
+            _rlFastReplayActive = false;
+            if(isReady() && !_api.ResearchPaused)
+            {
+               _api.setResearchPaused(true);
+            }
+         }
+         if(!isReady())
+         {
+            rlSend({"type":"error","request":param1,"command":"fast_replay_batch","message":"game became unavailable during batch"});
+            return;
+         }
+         if(_loc4_ && _rlFastReplayAdvanced == 0 && !_loc3_)
+         {
+            rlSend({"type":"error","request":param1,"command":"fast_replay_batch","message":"research frame could not run"});
+            return;
+         }
+         rlSend({"type":"fast_replay_complete","request":param1,"command":"fast_replay_batch","advanced":_rlFastReplayAdvanced,"frame":_api.ElapsedFrames,"ended":_api.GameEnded ? 1 : 0,"done":_loc3_ ? 1 : 0,"state":rlBuildMinimalState()});
+         _rlFastReplayRequest = -1;
+         _rlFastReplayAdvanced = 0;
+      }
+
+      /**
        * Per-frame tick handler: stream a state snapshot to the connected agent.
        */
       private static function rlOnTick(param1:Event) : void
       {
          if(_rlClient == null || !_rlClient.connected)
          {
+            return;
+         }
+         // Direct fast batches invoke this listener synchronously for every
+         // simulated frame. Buffer only; socket polling, overlay work, and
+         // normal state streaming would otherwise defeat batching.
+         if(_rlFastReplayActive)
+         {
+            if(_rlEpisodeRecording)
+            {
+               rlBufferFrame();
+            }
+            if(!_api.ResearchPaused)
+            {
+               _api.setResearchPaused(true);
+            }
             return;
          }
          // Poll the socket directly: AIR's ProgressEvent.SOCKET_DATA is
@@ -1293,6 +1421,15 @@ package com.mcleodgaming.ssf2.modapi
          if(_rlEpisodeRecording)
          {
             rlBufferFrame();
+         }
+         // The first replay tick establishes live match state. Pause directly
+         // afterward so Python can observe match start without losing frames
+         // before it submits the first bounded batch.
+         if(_rlPauseReplayOnStart)
+         {
+            _rlPauseReplayOnStart = false;
+            _rlLockstep = true;
+            _api.setResearchPaused(true);
          }
          if(_rlPauseAfterTick)
          {
@@ -1424,6 +1561,10 @@ package com.mcleodgaming.ssf2.modapi
 
       private static function rlOnGameEnded(param1:Event) : void
       {
+         if(_rlFastReplayActive)
+         {
+            return;
+         }
          rlSend({"type":"game_ended"});
       }
 
@@ -1982,7 +2123,7 @@ package com.mcleodgaming.ssf2.modapi
        * Load a replay from parsed JSON and start the match in replay mode.
        * Replicates the VaultMenu replay loading flow without the menu UI.
        */
-      public static function rlLoadReplay(param1:Object, param2:int = -1) : void
+      public static function rlLoadReplay(param1:Object, param2:int = -1, param3:Boolean = false) : void
       {
          try
          {
@@ -2000,6 +2141,27 @@ package com.mcleodgaming.ssf2.modapi
                rlSend({"type":"error","request":param2,"command":"load_replay","message":"incompatible replay version: " + _loc1_.VersionNumber});
                return;
             }
+            // A replay can be loaded immediately after another replay ends.
+            // Clear the previous StageData and its GameController start flag
+            // before queuing resources for the new replay, just as restart
+            // does for ordinary research matches.
+            if(Boolean(_api) && Boolean(_api.ResearchPaused))
+            {
+               _api.setResearchPaused(false);
+            }
+            _rlLockstep = false;
+            _rlPauseAfterTick = false;
+            _rlStepRequest = -1;
+            if(Boolean(GameController.stageData))
+            {
+               GameController.stageData.endGame(true);
+            }
+            else
+            {
+               GameController.endMatch();
+            }
+            GameController.destroyStageData();
+            GameController.isStarted = false;
             // Create the game with the replay's player count and mode
             var _loc2_:int = _loc1_.PlayerData.length;
             var _loc3_:Game = new Game(_loc2_,Mode.VS);
@@ -2028,6 +2190,7 @@ package com.mcleodgaming.ssf2.modapi
                _loc4_++;
             }
             // Start the match
+            _rlPauseReplayOnStart = param3;
             GameController.isStarted = true;
             ResourceManager.load({"oncomplete":function(...args):void
             {
@@ -2039,6 +2202,7 @@ package com.mcleodgaming.ssf2.modapi
          }
          catch(e:Error)
          {
+            _rlPauseReplayOnStart = false;
             rlSend({"type":"error","request":param2,"command":"load_replay","message":e.message});
             trace("[ModAPI RL] loadReplay failed: " + e.message);
          }
