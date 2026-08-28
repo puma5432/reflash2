@@ -55,9 +55,11 @@ from .policy.observation import (
     CHAR_FEATURES,
     OBS_DIM,
     build_obs,
+    build_raw_obs,
     char_vec,
     obs_feature_names,
     pick_chars,
+    raw_char_vec,
 )
 from .policy.reward import reward_delta
 from .protocol import BridgeError, SSF2Bridge
@@ -123,8 +125,10 @@ __all__ = [
     "CHAR_FEATURES",
     "OBS_DIM",
     "build_obs",
+    "build_raw_obs",
     "char_vec",
     "obs_feature_names",
     "pick_chars",
+    "raw_char_vec",
     "reward_delta",
 ]

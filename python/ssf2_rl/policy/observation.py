@@ -41,3 +41,47 @@ def build_obs(state: dict, me_id: int) -> np.ndarray:
     dx, dy = opponent["x"] - me["x"], opponent["y"] - me["y"]
     values = char_vec(me) + char_vec(opponent) + [norm(dx, _POS), norm(dy, _POS), norm(math.sqrt(dx * dx + dy * dy), _POS), 1.0 if (dx >= 0) == bool(me["facing"]) else -1.0, norm(state["frame"], 1e5), 1.0 if state["paused"] else -1.0]
     return np.asarray(values, dtype=np.float32)
+
+def raw_char_vec(character: dict) -> list[float]:
+    return [
+        float(character["x"]),
+        float(character["y"]),
+        float(character["nxs"]),
+        float(character["nys"]),
+        float(bool(character["facing"])),
+        float(character["damage"]),
+        float(character["stocks"]),
+        float(bool(character["ground"])),
+        float(character["jumpCount"]),
+        float(character["shieldPower"]),
+        float(bool(character["shielding"])),
+        float(bool(character["hitstun"])),
+        float(bool(character["atkFrame"])),
+        float(character["atkExec"]),
+        float(bool(character["hanging"])),
+        float(bool(character["dead"])),
+    ]
+
+
+def build_raw_obs(state: dict, me_id: int) -> np.ndarray:
+    me, opponent = pick_chars(state, me_id)
+    if me is None or opponent is None:
+        return np.zeros((OBS_DIM,), dtype=np.float32)
+
+    dx = opponent["x"] - me["x"]
+    dy = opponent["y"] - me["y"]
+    distance = math.sqrt(dx * dx + dy * dy)
+
+    values = (
+        raw_char_vec(me)
+        + raw_char_vec(opponent)
+        + [
+            float(dx),
+            float(dy),
+            float(distance),
+            float((dx >= 0) == bool(me["facing"])),
+            float(state["frame"]),
+            float(bool(state["paused"])),
+        ]
+    )
+    return np.asarray(values, dtype=np.float32)

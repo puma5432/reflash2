@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 import numpy as np
-from ..policy.observation import build_obs
+from ..policy.observation import build_obs, build_raw_obs
 from ..policy.reward import reward_delta
 
 
@@ -20,10 +20,23 @@ class Episode:
     def __len__(self) -> int:
         return len(self.frames)
 
-    def to_bc_dataset(self, player_id: int, include_rewards: bool = False):
+    def to_bc_dataset(self,
+                      player_id: int,
+                      include_rewards: bool = False,
+                      normalize: bool = True):
+        """Return per-frame observations and native control-mask actions.
+
+        Args:
+            player_id: Player perspective for the first 16 observation values.
+            include_rewards: Include damage/KO shaping rewards as a third array.
+            normalize: Use the fixed normalized observation representation.
+                Set to ``False`` to return native engine values with the same
+                38-feature layout, suitable for fitting a training-only scaler.
+        """
         observations, actions, rewards = [], [], []
+        observation_builder = build_obs if normalize else build_raw_obs
         for index, frame in enumerate(self.frames):
-            observations.append(build_obs(frame, player_id))
+            observations.append(observation_builder(frame, player_id))
             character = next((char for char in frame["chars"] if char["id"] == player_id), None)
             actions.append(character["controls"] if character else 0)
             if include_rewards and index > 0:
