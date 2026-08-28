@@ -2,6 +2,8 @@
 """Wait for the SSF2 RL bridge to come online and print the handshake + first state.
 
 Run this in one terminal, then start a match in the game.
+
+Usage: .venv/bin/python tools/rl/diagnostics/wait_for_bridge.py
 """
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 from ssf2_rl import SSF2Bridge  # noqa: E402
 

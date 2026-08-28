@@ -4,7 +4,7 @@ NOTE: the game only supports ONE bridge client at a time. Running this will
 disconnect any notebook that is currently connected; re-run env.reset() in the
 notebook afterwards.
 
-Usage: .venv/bin/python tools/rl/diagnose_bridge.py
+Usage: .venv/bin/python tools/rl/diagnostics/diagnose_bridge.py
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 from ssf2_rl import SSF2Bridge  # noqa: E402
 from ssf2_rl.game.controls import BITS, describe_mask  # noqa: E402

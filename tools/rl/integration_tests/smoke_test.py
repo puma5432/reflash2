@@ -6,7 +6,7 @@ Usage:
        AIR_SDK_HOME=~/Developer/AIRSDK_51.3.3 bash tools/macos/run_macos.sh
   2. Start a local VS match (any characters, CPU opponent is fine).
   3. Run this script:
-       python3 tools/rl/smoke_test.py
+    python3 tools/rl/integration_tests/smoke_test.py
 
 It connects to the bridge, prints the handshake and a few state snapshots,
 takes over player slot 2 (if human) and wiggles the controlled character
@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 from ssf2_rl import SSF2Bridge, Controls, describe_mask  # noqa: E402
 

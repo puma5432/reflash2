@@ -6,7 +6,7 @@ Separates:
   - step round-trip: transport + one PERFORMALL tick + state build + reply
   - Python-side overhead: obs/reward construction in env.step()
 
-Usage: .venv/bin/python tools/rl/profile_step.py [--frames 300]
+Usage: .venv/bin/python tools/rl/integration_tests/profile_step.py [--frames 300]
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 from ssf2_rl.policy.bots import ZeroBot  # noqa: E402
 from ssf2_rl.env.gym_env import SSF2Env  # noqa: E402

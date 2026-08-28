@@ -7,7 +7,7 @@
 # Then deploys it (and autostart.json) into the macOS launch payload.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FFDEC="$REPO_ROOT/FFDec.app/Contents/Resources/ffdec.jar"
 WORK="$REPO_ROOT/.macos/swf_work"
 PAYLOAD="$REPO_ROOT/.macos/payload"
@@ -18,12 +18,12 @@ cp "$REPO_ROOT/build/SSF2.swf" "$WORK/SSF2_patched.swf"
 echo "Patching ModAPI + Main + AI + StageData via FFDec ..."
 java -Xmx4g -jar "$FFDEC" -air -replace \
   "$WORK/SSF2_patched.swf" "$WORK/SSF2_patched.swf" \
-  com.mcleodgaming.ssf2.modapi.ModAPI "$REPO_ROOT/tools/rl/ModAPI_patched.as" \
-  com.mcleodgaming.ssf2.Main "$REPO_ROOT/tools/rl/Main_patched.as" \
-  com.mcleodgaming.ssf2.engine.AI "$REPO_ROOT/tools/rl/AI_patched.as" \
-  com.mcleodgaming.ssf2.engine.StageData "$REPO_ROOT/tools/rl/StageData_patched.as"
+  com.mcleodgaming.ssf2.modapi.ModAPI "$REPO_ROOT/tools/rl/patches/ModAPI_patched.as" \
+  com.mcleodgaming.ssf2.Main "$REPO_ROOT/tools/rl/patches/Main_patched.as" \
+  com.mcleodgaming.ssf2.engine.AI "$REPO_ROOT/tools/rl/patches/AI_patched.as" \
+  com.mcleodgaming.ssf2.engine.StageData "$REPO_ROOT/tools/rl/patches/StageData_patched.as"
 
 
 cp "$WORK/SSF2_patched.swf" "$PAYLOAD/SSF2.swf"
-cp "$REPO_ROOT/tools/rl/autostart.json" "$PAYLOAD/autostart.json"
+cp "$REPO_ROOT/tools/rl/config/autostart.json" "$PAYLOAD/autostart.json"
 echo "DEPLOYED to $PAYLOAD"

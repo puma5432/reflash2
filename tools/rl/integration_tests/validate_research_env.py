@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Live correctness and throughput validation for one active SSF2 environment."""
+"""Live correctness and throughput validation for one active SSF2 environment.
+
+Usage: .venv/bin/python tools/rl/integration_tests/validate_research_env.py
+"""
 
 from __future__ import annotations
 

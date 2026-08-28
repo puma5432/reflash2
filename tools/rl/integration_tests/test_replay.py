@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Test .ssfrec replay loading and state collection."""
+"""Test .ssfrec replay loading and state collection.
+
+Usage: .venv/bin/python tools/rl/integration_tests/test_replay.py
+"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 from ssf2_rl.env.gym_env import SSF2Env
 
