@@ -21,7 +21,8 @@ java -Xmx4g -jar "$FFDEC" -air -replace \
   com.mcleodgaming.ssf2.modapi.ModAPI "$REPO_ROOT/tools/rl/patches/ModAPI_patched.as" \
   com.mcleodgaming.ssf2.Main "$REPO_ROOT/tools/rl/patches/Main_patched.as" \
   com.mcleodgaming.ssf2.engine.AI "$REPO_ROOT/tools/rl/patches/AI_patched.as" \
-  com.mcleodgaming.ssf2.engine.StageData "$REPO_ROOT/tools/rl/patches/StageData_patched.as"
+  com.mcleodgaming.ssf2.engine.StageData "$REPO_ROOT/tools/rl/patches/StageData_patched.as" \
+  com.mcleodgaming.ssf2.Config "$REPO_ROOT/tools/rl/patches/Config_patched.as"
 
 
 cp "$WORK/SSF2_patched.swf" "$PAYLOAD/SSF2.swf"
