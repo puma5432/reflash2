@@ -5,29 +5,35 @@ from __future__ import annotations
 NOOP = 0
 START = 1 << 3
 TAUNT = 1 << 2
+
 LEFT = 1 << 9
 RIGHT = 1 << 8
 UP = 1 << 11
 DOWN = 1 << 10
+
 DT_DASH = 1 << 12
 AUTO_DASH = 1 << 13
 DASH = 1 << 14
+
 ATTACK = 1 << 5
 SPECIAL = 1 << 6
 GRAB = 1 << 4
 SHIELD = 1 << 1
 SHIELD2 = 1 << 20
+
 TAP_JUMP = 1 << 0
 JUMP = 1 << 7
 JUMP2 = 1 << 19
 JUMP3 = 1 << 21
+
 C_LEFT = 1 << 16
 C_RIGHT = 1 << 15
 C_UP = 1 << 18
 C_DOWN = 1 << 17
+
 ALL_BITS = (1 << 22) - 1
 
-BITS = {
+BITS = { #TODO: I don't want the action space to be this; remove this
     "TAP_JUMP": TAP_JUMP, "SHIELD": SHIELD, "TAUNT": TAUNT, "START": START,
     "GRAB": GRAB, "SPECIAL": SPECIAL, "ATTACK": ATTACK, "JUMP": JUMP,
     "RIGHT": RIGHT, "LEFT": LEFT, "DOWN": DOWN, "UP": UP,

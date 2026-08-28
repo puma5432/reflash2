@@ -16,7 +16,19 @@ MAX_EPISODE_PAYLOAD = 64 * 1024 * 1024
 
 def _character(record: tuple, names: dict[int, str]) -> dict:
     player_id, x, y, nxs, nys, facing, damage, stocks, ground, jump_count, shield_power, flags, atk_exec, controls = record
-    return {"id": player_id, "name": names.get(player_id, f"P{player_id}"), "x": x, "y": y, "nxs": nxs, "nys": nys, "facing": facing, "damage": damage, "stocks": stocks, "ground": ground, "jumpCount": jump_count, "shieldPower": shield_power, "shielding": 1 if flags & 1 else 0, "hitstun": 1 if flags & 2 else 0, "atkFrame": 1 if flags & 4 else 0, "atkExec": atk_exec, "hanging": 1 if flags & 8 else 0, "dead": 1 if flags & 16 else 0, "controls": controls}
+    return {"id": player_id,
+            "name": names.get(player_id, f"P{player_id}"),
+            "x": x, "y": y, "nxs": nxs, "nys": nys,
+            "facing": facing, "damage": damage,
+            "stocks": stocks, "ground": ground,
+            "jumpCount": jump_count, "shieldPower": shield_power,
+            "shielding": 1 if flags & 1 else 0,
+            "hitstun": 1 if flags & 2 else 0,
+            "atkFrame": 1 if flags & 4 else 0,
+            "atkExec": atk_exec,
+            "hanging": 1 if flags & 8 else 0,
+            "dead": 1 if flags & 16 else 0,
+            "controls": controls}
 
 
 def decode_binary_state(kind: int, payload: bytes, char_names: dict[int, str]) -> tuple[dict, int]:
