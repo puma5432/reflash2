@@ -3,8 +3,11 @@ FFDec.app
 
 # Builds/data
 build/swf_checkpoints/
+decompiled/
 .macos/
-notebooks/data/
+notebooks/data/*
+!notebooks/data/toy/
+!notebooks/data/toy/**
 
 # Tools
 .venv/
