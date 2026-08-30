@@ -1,6 +1,6 @@
 """Public API for SSF2 research environments and policy tooling."""
 
-from .data import Episode
+from .data import Episode, ReplayItemSettings, ReplayMatchSettings, ReplayPlayerSettings, SSFRec, load_ssfrec
 from .env import SSF2Env
 from .game.catalog import CHARACTERS, RANDOM, STAGES, Character, Stage
 from .game.controls import (
@@ -69,6 +69,11 @@ __all__ = [
     "BridgeError",
     "SSF2Env",
     "Episode",
+    "SSFRec",
+    "ReplayPlayerSettings",
+    "ReplayMatchSettings",
+    "ReplayItemSettings",
+    "load_ssfrec",
     "Controls",
     "BITS",
     "bit_name_map",
